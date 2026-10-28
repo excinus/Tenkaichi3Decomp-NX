@@ -4430,3 +4430,30 @@ the Worker for every run):
 Windows: built (mingw), not run. The PS2 build of port_tbo.c is unchanged (`cpp -P` md5; all of it is `#ifdef PORT`).
 Not tested: Dragon Net Battle's buttons pressed (only seen; they call what the pages call), a real second PC, the
 screen reader's lines of the new page.
+
+## Widescreen menus, beta (2026-10-29)
+
+F1 > UI > Menus: **Stretched** (as before: the 4:3 pages stretched to the width), **4:3** (the setting `menus_43`, as
+before) or **Widescreen (beta)** (setting `menus_wide`; `BT3_MENU_WIDE=0/1` over it). With the last, a screen
+converted for it has its 2D at its true shape across the whole width, the way the fight's HUD is:
+
+- The game marks its draw (`#ifdef PORT`; `port/src/gs_marker.c`): `Port_MenuPage(screen)` at the start of the
+  screen's draw and `Port_MenuPage(0)` at its end; `Port_MenuFill(1/0)` around its backdrops
+  (`Sprite_DrawPicture`); and `FlashSlot_Draw` (src/sys/gfxm_c.c) asks `Port_MenuClipPart` for each clip of its
+  movies, by the clip's name, which part it belongs to: the middle, the left edge, the right edge, or the whole
+  width. A clip's text drawn by its own callback goes with it; text the game queues and draws after the screen
+  (`Font_FlushAll`) does not, so a plate with such text stays in the middle.
+- Markers 0x22..0x25 (centre, fill, left, right) -> `gsAnchor` 9..12 (`GsGpu_Native`). The renderer narrows each
+  2D piece of the first, third and fourth about the middle, the left edge or the right edge, whatever its width
+  (a bar's pieces stay together), and leaves what fills alone, as it does a piece as wide as the whole 4:3 screen
+  (scenery, tints, panels across the screen). What lies beyond the 4:3 screen's edges (plates sliding in) is
+  clipped where that edge now is, as it was out of sight there.
+- Converted: the title (one page in the middle; sky and clouds fill), the main menu (the column of plates, the
+  dragon balls and the message against the left edge, the guides against the right; sea, road and clouds fill),
+  the character, stage and music select with its VS picture (one page in the middle: each player's big picture
+  keeps to the line between the two, the user's choice; the stage pictures and the long bars fill). The other
+  screens mark nothing and are stretched.
+- `BT3_CLIP_LOG=1` (testing) lists each clip a converted screen draws, once: the names the table goes by.
+- Checked: the recording at 16:9 with the layout chosen, by picture (title, main menu, character select, stage
+  select, VS); with it not chosen, the 28 screenshots as before, both with "4:3" and with "Stretched". Not handled
+  yet: a swirl of cloud at the main menu's top right, part of the column's page, stops where the 4:3 page did.

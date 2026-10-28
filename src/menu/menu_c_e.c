@@ -25,7 +25,7 @@ extern volatile int gUiSongX, gUiSongY, gUiSongW, gUiSongH;
 extern volatile int gUiSongIdx, gUiSongReady, gUiSongLit;
 #endif
 #ifdef PORT
-extern void Port_MenuPage(int on); /* port/src/gs_marker.c: widescreen menus */
+extern void Port_MenuPage(int screen); /* port/src/gs_marker.c: widescreen menus */
 extern void Port_MenuFill(int on);
 #endif
 
@@ -852,7 +852,7 @@ void CharSel_Draw(void) {
         }
 #ifdef PORT
         if (i == 0) {
-            Port_MenuPage(1); /* widescreen menus: this screen's page, the stage pictures filling the width (port/src/gs_marker.c) */
+            Port_MenuPage(3); /* widescreen menus: this screen's page (port/src/gs_marker.c), the stage pictures filling the width */
         }
         Port_MenuFill(1);
         Sprite_DrawPicture(gCharSel->bg[i], 0, 0, gCharSel->bgAlpha[i]);
@@ -862,7 +862,7 @@ void CharSel_Draw(void) {
 #endif
     }
 #ifdef PORT
-    Port_MenuPage(1); /* (also when the first picture was left out above) */
+    Port_MenuPage(3); /* (also when the first picture was left out above) */
 #endif
 
     f = &gCharSel->flash[0];

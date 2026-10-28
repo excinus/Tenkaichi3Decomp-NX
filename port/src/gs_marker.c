@@ -97,5 +97,9 @@ int Port_MenuClipPart(const char *name) {
             return PORT_MENU_RIGHT;
         }
     }
+    /* (character select: one page in the middle. Its big pictures are as wide as half of the 4:3 screen and keep to
+       the line between the two players, as there (the user's choice); its name plates' text is queued and drawn
+       after all of the screen (Font_FlushAll), not in the plate's clip, so a plate anchored to a side would leave
+       its text behind. The stage pictures and the long bars fill the width.) */
     return PORT_MENU_NONE;
 }
