@@ -8,6 +8,10 @@
 #include "sys/heap.h"
 #include "sys/dma.h"
 #include "sys/gfx.h"
+#ifdef PORT
+extern int Port_MenuClipPart(const char *name); /* port/src/gs_marker.c: widescreen menus */
+extern int Port_MenuPart(int part);
+#endif
 #include "sys/gfxm_b_b.h"
 
 extern void *memcpy(void *dst, const void *src, u32 size);
@@ -651,6 +655,13 @@ void FlashSlot_Draw(FlashSlot *slot, FlashProp *parent, Flash *flash) {
         if (clip->preDraw != NULL) {
             clip->preDraw(clip->preArg);
         }
+#ifdef PORT
+        {
+            /* widescreen menus: the clip (and what it holds, its text too) anchored as its screen has it
+               (port/src/gs_marker.c) */
+            int part = Port_MenuClipPart(clip->name);
+            int prev = part >= 0 ? Port_MenuPart(part) : 0;
+#endif
         FlashTl_Draw(&clip->tl, &prop);
         if (clip->drawOver != NULL) {
             clip->drawOver(clip->overArg, &prop);
@@ -658,6 +669,12 @@ void FlashSlot_Draw(FlashSlot *slot, FlashProp *parent, Flash *flash) {
         if (clip->postDraw != NULL) {
             clip->postDraw(clip->postArg);
         }
+#ifdef PORT
+            if (part >= 0) {
+                Port_MenuPart(prev);
+            }
+        }
+#endif
     }
 }
 
