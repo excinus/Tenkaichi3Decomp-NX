@@ -52,12 +52,24 @@ jobs:
           file Tenkaichi3Decomp-setup
           otool -L Tenkaichi3Decomp-setup | grep -i sdl
 
+      # The experimental Mac download, as the Linux and Windows zips (not published: a run artifact, for testers)
+      - name: Package
+        env:
+          BT3_CC: mac64
+        run: .venv/bin/python port/tools/package.py
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: macos-build-logs
           path: port/build/*_mac64.txt
           if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Tenkaichi3Decomp-macos-arm64
+          path: port/build/Tenkaichi3Decomp-macos-arm64.zip
+          if-no-files-found: error
+          retention-days: 30
       - uses: actions/upload-artifact@v4
         with:
           name: bt3_mac-arm64
