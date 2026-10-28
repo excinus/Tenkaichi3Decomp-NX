@@ -28,9 +28,10 @@ void Port_GsMarker(int effect) {
      PORT_MENU_LEFT    against the left edge (a menu's column)
      PORT_MENU_RIGHT   against the right edge (the characters beside it)
      PORT_MENU_FILL    across the whole width, stretched (backdrops, scrolling scenery)
+     PORT_MENU_CENTER_ALL  as CENTER, and pieces as wide as the 4:3 screen too (in the others they fill the width)
    Which clip of a screen's movie goes where is the table in Port_MenuClipPart, by the clips' names. A screen that
    marks nothing is stretched as before. The renderer acts on the markers only with that layout chosen. */
-enum { PORT_MENU_NONE = -1, PORT_MENU_CENTER, PORT_MENU_FILL, PORT_MENU_LEFT, PORT_MENU_RIGHT };
+enum { PORT_MENU_NONE = -1, PORT_MENU_CENTER, PORT_MENU_FILL, PORT_MENU_LEFT, PORT_MENU_RIGHT, PORT_MENU_CENTER_ALL };
 static int sMenuScreen;              /* PORT_MENU_SCREEN_* of the page being drawn, 0: none */
 static int sMenuPart = PORT_MENU_NONE;
 
@@ -44,11 +45,18 @@ int Port_MenuPart(int part) {
     return prev;
 }
 
+/* The part being drawn now (PORT_MENU_NONE outside a converted screen) */
+int Port_MenuPartNow(void) {
+    return sMenuPart;
+}
+
 /* A converted screen's draw begins (its PORT_MENU_SCREEN_* number) / ends (0). */
 void Port_MenuPage(int screen) {
     sMenuScreen = screen;
     /* (the main menu: what is not named in Port_MenuClipPart belongs to its column, on the left) */
-    Port_MenuPart(screen == 0 ? PORT_MENU_NONE : screen == 2 ? PORT_MENU_LEFT : PORT_MENU_CENTER);
+    /* (character select: all of it at its true shape, its bars too, which are pieces as wide as the 4:3 screen, so
+       that the bars' cells and the characters in them stay together; only the stage pictures fill the width) */
+    Port_MenuPart(screen == 0 ? PORT_MENU_NONE : screen == 2 ? PORT_MENU_LEFT : screen == 3 ? PORT_MENU_CENTER_ALL : PORT_MENU_CENTER);
 }
 
 /* Backdrops: on, and back to the page's part */
@@ -97,9 +105,16 @@ int Port_MenuClipPart(const char *name) {
             return PORT_MENU_RIGHT;
         }
     }
-    /* (character select: one page in the middle. Its big pictures are as wide as half of the 4:3 screen and keep to
-       the line between the two players, as there (the user's choice); its name plates' text is queued and drawn
-       after all of the screen (Font_FlushAll), not in the plate's clip, so a plate anchored to a side would leave
-       its text behind. The stage pictures and the long bars fill the width.) */
+    if (sMenuScreen == 3) {
+        /* character select: each player's name plates, windows and their text against that player's edge (the
+           text is queued and drawn after the screen, Font_Flush, in the part it was queued in). The big pictures
+           (mc_single_chara_*, their masks) are as wide as half of the 4:3 screen and keep to the line between the
+           two players, as there (the user's choice). */
+        size_t n = strlen(name);
+        if (n > 2 && name[n - 2] == '_' && (name[n - 1] == 'l' || name[n - 1] == 'r') && !starts(name, "mc_single_chara_") &&
+            !starts(name, "mc_face_mask_")) {
+            return name[n - 1] == 'l' ? PORT_MENU_LEFT : PORT_MENU_RIGHT;
+        }
+    }
     return PORT_MENU_NONE;
 }

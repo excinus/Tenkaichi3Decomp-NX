@@ -4448,12 +4448,18 @@ converted for it has its 2D at its true shape across the whole width, the way th
   (a bar's pieces stay together), and leaves what fills alone, as it does a piece as wide as the whole 4:3 screen
   (scenery, tints, panels across the screen). What lies beyond the 4:3 screen's edges (plates sliding in) is
   clipped where that edge now is, as it was out of sight there.
+- Text the game queues and draws after the screen (`Font_Flush`, src/battle/col_c.c) keeps the part it was queued
+  in: each command remembers it (`Font_AllocCmd`), and the flush ends its packet and sends a marker where it
+  changes. Outside a converted screen nothing is sent.
 - Converted: the title (one page in the middle; sky and clouds fill), the main menu (the column of plates, the
-  dragon balls and the message against the left edge, the guides against the right; sea, road and clouds fill),
-  the character, stage and music select with its VS picture (one page in the middle: each player's big picture
-  keeps to the line between the two, the user's choice; the stage pictures and the long bars fill). The other
-  screens mark nothing and are stretched.
+  dragon balls and the message against the left edge, the guides against the right, and a piece of the column
+  lying in the right half against its edge there: the gold cloud at the top right; sea, road and clouds fill), the
+  character, stage and music select with its VS picture: each player's name plates, windows and their text against
+  that player's edge (clips named `*_l` / `*_r`); the rest one page in the middle at its true shape, the bars too
+  (their cells and the characters in them stay together); each player's big picture keeps to the line between the
+  two (the user's choice: the art is half a 4:3 screen wide, so it ends short of the outer edge); only the stage
+  pictures fill. The other screens mark nothing and are stretched.
+- `BT3_MENU_NOCLIP=1` (testing): no clipping at the 4:3 edges (the portraits end where they did: it is their art).
 - `BT3_CLIP_LOG=1` (testing) lists each clip a converted screen draws, once: the names the table goes by.
 - Checked: the recording at 16:9 with the layout chosen, by picture (title, main menu, character select, stage
-  select, VS); with it not chosen, the 28 screenshots as before, both with "4:3" and with "Stretched". Not handled
-  yet: a swirl of cloud at the main menu's top right, part of the column's page, stops where the 4:3 page did.
+  select, VS); with it not chosen, the 28 screenshots as before, both with "4:3" and with "Stretched".
