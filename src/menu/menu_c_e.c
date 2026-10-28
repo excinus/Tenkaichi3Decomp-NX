@@ -27,6 +27,7 @@ extern volatile int gUiSongIdx, gUiSongReady, gUiSongLit;
 #ifdef PORT
 extern void Port_MenuPage(int screen); /* port/src/gs_marker.c: widescreen menus */
 extern void Port_MenuFill(int on);
+extern void Port_MenuMovie(int index);
 #endif
 
 /*
@@ -1198,9 +1199,17 @@ void CharSel_Draw(void) {
         }
     }
 
+#ifdef PORT
+    for (i = 0; i < CHARSEL_FLASH_NUM; i++) {
+        Port_MenuMovie(i); /* widescreen menus: which of the screen's movies (port/src/gs_marker.c) */
+        Flash_Draw(&gCharSel->flash[i]);
+    }
+    Port_MenuMovie(0);
+#else
     for (i = 0; i < CHARSEL_FLASH_NUM; i++) {
         Flash_Draw(&gCharSel->flash[i]);
     }
+#endif
     Font_FlushAll();
     IconWin_Draw();
     ItemPanel_Draw(0);

@@ -4455,10 +4455,16 @@ converted for it has its 2D at its true shape across the whole width, the way th
   dragon balls and the message against the left edge, the guides against the right, and a piece of the column
   lying in the right half against its edge there: the gold cloud at the top right; sea, road and clouds fill), the
   character, stage and music select with its VS picture: each player's name plates, windows and their text against
-  that player's edge (clips named `*_l` / `*_r`); the rest one page in the middle at its true shape, the bars too
+  that player's edge (clips named `*_l` / `*_r`), and each player's roster with its cursor (movies 1 and 2, the
+  first player's against the left edge) and window of customisations (3 and 4) as well (`Port_MenuMovie`); the
+  rest one page in the middle at its true shape, the bars too
   (their cells and the characters in them stay together); each player's big picture keeps to the line between the
   two (the user's choice: the art is half a 4:3 screen wide, so it ends short of the outer edge); only the stage
   pictures fill. The other screens mark nothing and are stretched.
+- Parts that keep the 4:3 screen's full-width pieces too (`*_ALL`, markers 0x26..0x28, anchors 13..15) do so with
+  textured ones only: an untextured one (a fade) still covers the whole picture. A menu's narrower untextured
+  pieces (a plate's plain body, the music's plate) keep their shape like its art. Backdrop clips are `mc_bg_*`
+  and `mc_kumo_*` (not `mc_bgm_now`, the music's plate).
 - `BT3_MENU_NOCLIP=1` (testing): no clipping at the 4:3 edges (the portraits end where they did: it is their art).
 - `BT3_CLIP_LOG=1` (testing) lists each clip a converted screen draws, once: the names the table goes by.
 - Checked: the recording at 16:9 with the layout chosen, by picture (title, main menu, character select, stage

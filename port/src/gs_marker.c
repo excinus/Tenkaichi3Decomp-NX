@@ -28,12 +28,26 @@ void Port_GsMarker(int effect) {
      PORT_MENU_LEFT    against the left edge (a menu's column)
      PORT_MENU_RIGHT   against the right edge (the characters beside it)
      PORT_MENU_FILL    across the whole width, stretched (backdrops, scrolling scenery)
-     PORT_MENU_CENTER_ALL  as CENTER, and pieces as wide as the 4:3 screen too (in the others they fill the width)
+     PORT_MENU_CENTER_ALL, _LEFT_ALL, _RIGHT_ALL  as CENTER, LEFT, RIGHT, and pieces as wide as the 4:3 screen too
+                       (in the others they fill the width): a bar whose cells hold other pieces
    Which clip of a screen's movie goes where is the table in Port_MenuClipPart, by the clips' names. A screen that
    marks nothing is stretched as before. The renderer acts on the markers only with that layout chosen. */
-enum { PORT_MENU_NONE = -1, PORT_MENU_CENTER, PORT_MENU_FILL, PORT_MENU_LEFT, PORT_MENU_RIGHT, PORT_MENU_CENTER_ALL };
-static int sMenuScreen;              /* PORT_MENU_SCREEN_* of the page being drawn, 0: none */
+enum { PORT_MENU_NONE = -1, PORT_MENU_CENTER, PORT_MENU_FILL, PORT_MENU_LEFT, PORT_MENU_RIGHT, PORT_MENU_CENTER_ALL, PORT_MENU_LEFT_ALL,
+       PORT_MENU_RIGHT_ALL };
 static int sMenuPart = PORT_MENU_NONE;
+static int sMenuMovie;               /* which of the screen's movies is being drawn (Port_MenuMovie) */
+static int sMenuScreen;              /* PORT_MENU_SCREEN_* of the page being drawn, 0: none */
+
+int Port_MenuPart(int part);
+
+/* The screen's movie `index` is drawn next. Character select: movie 1 is the first player's roster and 3 that
+   player's window of customisations, 2 and 4 the other player's: each against that player's edge. */
+void Port_MenuMovie(int index) {
+    sMenuMovie = index;
+    if (sMenuScreen == 3) {
+        Port_MenuPart(index == 0 ? PORT_MENU_CENTER_ALL : index & 1 ? PORT_MENU_LEFT_ALL : PORT_MENU_RIGHT_ALL);
+    }
+}
 
 /* The part what follows belongs to; returns the one before (to be given back). */
 int Port_MenuPart(int part) {
@@ -86,14 +100,16 @@ int Port_MenuClipPart(const char *name) {
         static char seen[512][64];
         static int n;
         int i;
-        for (i = 0; i < n && strcmp(seen[i], name) != 0; i++) {
+        char key[64];
+        snprintf(key, sizeof(key), "%d %d %s", sMenuScreen, sMenuMovie, name);
+        for (i = 0; i < n && strcmp(seen[i], key) != 0; i++) {
         }
         if (i == n && n < 512) {
-            snprintf(seen[n++], 64, "%s", name);
-            fprintf(stderr, "bt3: menu clip %d %s\n", sMenuScreen, name);
+            snprintf(seen[n++], 64, "%s", key);
+            fprintf(stderr, "bt3: menu clip %s\n", key);
         }
     }
-    if (starts(name, "mc_bg") || starts(name, "mc_kumo_")) {
+    if (starts(name, "mc_bg_") || starts(name, "mc_kumo_")) { /* (not "mc_bgm_now": the music's plate) */
         return PORT_MENU_FILL;
     }
     if (sMenuScreen == 2) { /* the main menu: the column of plates on the left, the guides on the right */
