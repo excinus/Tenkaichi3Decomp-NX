@@ -1618,7 +1618,7 @@ void GsGpu_Draw(int type, int ctx, const GsVertex *v) {
     /* (Not the cross-fade's picture: it is the whole frame as it was shown, wide view and all, drawn back over the
        whole frame in strips. Each strip is narrower than the screen, so the rule below took it for a piece of 2D
        art and the old shot was drawn at three quarters of the width over the new one: seen by the user.) */
-    if (Port_IsWide() && (!gPortMenuMode || ((gsAnchor == 9 || (gsAnchor >= 11 && gsAnchor <= 16)) && Port_MenusWide()) || (gsAnchor == 7 && Port_PageAspectMilli() > 1340) ||
+    if (Port_IsWide() && (!gPortMenuMode || ((gsAnchor == 9 || (gsAnchor >= 11 && gsAnchor <= 17)) && Port_MenusWide()) || (gsAnchor == 7 && Port_PageAspectMilli() > 1340) ||
                           (battleText && Port_PageAspectMilli() > 1340)) &&
         !sWholeFrame && !d.tex_is_target && !tbo && (type == 6 || fst || battleText || gsAnchor == 8 || (gPortMenuMode && gsAnchor >= 9)) &&
         gsTargets[d.target].fbp == (uint32_t)gGsMainFbp) {
@@ -1644,20 +1644,23 @@ void GsGpu_Draw(int type, int ctx, const GsVertex *v) {
         }
         if (type == 6 && !d.mode[0] && y1 - y0 >= 400.0f && !battleText) {
             pivot = -1.0f;
-        } else if ((gsAnchor == 9 || gsAnchor == 11 || gsAnchor == 12 || gsAnchor == 16 || (gsAnchor >= 13 && gsAnchor <= 15 && !d.mode[0])) && x0 <= 0.5f &&
+        } else if ((gsAnchor == 9 || gsAnchor == 11 || gsAnchor == 12 || gsAnchor == 16 || gsAnchor == 17 || (gsAnchor >= 13 && gsAnchor <= 15 && !d.mode[0])) && x0 <= 0.5f &&
                    x1 >= 511.5f) {
             /* (in a widescreen menu page, a piece as wide as the whole 4:3 screen is scenery or a tint over all of
                it: it fills the width; untextured (a fade, a tint), in a part that keeps such pieces too as well.
                A menu's untextured pieces narrower than that, a plate's plain body, keep their shape as its art does) */
             pivot = -1.0f;
-        } else if (gsAnchor == 9 || (gsAnchor >= 11 && gsAnchor <= 16)) {
+        } else if (gsAnchor == 9 || (gsAnchor >= 11 && gsAnchor <= 17)) {
             /* A menu screen converted for widescreen (Port_MenuPage, gs_marker.c): each part at its true shape about
                the middle, the left edge or the right edge, the long bars too (some of a bar's pieces are wider than
                480, some not: they have to stay together). What fills the width is marked 10 and not narrowed. */
             pivot = gsAnchor == 11 || gsAnchor == 14 ? 0.0f : gsAnchor == 12 || gsAnchor == 15 ? 512.0f : 256.0f;
-            if (gsAnchor == 16 && y0 <= 8.0f && x0 >= 256.0f && x1 >= 511.5f) {
-                pivot = 512.0f; /* (a page's piece from the top edge, in the right half against the edge: the corner's clouds) */
-            } else if (gsAnchor == 16 && y0 <= 8.0f && x1 <= 256.0f && x0 <= 0.5f) {
+            if (((gsAnchor == 16 || gsAnchor == 17) && y0 <= 8.0f && x0 >= 256.0f && x1 >= 511.5f) ||
+                (gsAnchor == 17 && y1 <= 120.0f && x0 >= 256.0f)) {
+                pivot = 512.0f; /* (a page's piece from the top edge, in the right half against the edge: the corner's clouds;
+                                   17: any in the top 120 lines starting in the right half, the shop's counters with their
+                                   icons and frames) */
+            } else if ((gsAnchor == 16 || gsAnchor == 17) && y0 <= 8.0f && x1 <= 256.0f && x0 <= 0.5f) {
                 pivot = 0.0f;
             }
             if (gsAnchor == 11 && x0 >= 256.0f && x1 >= 511.5f) {
@@ -1698,7 +1701,7 @@ void GsGpu_Draw(int type, int ctx, const GsVertex *v) {
             if (noclip < 0) {
                 noclip = getenv("BT3_MENU_NOCLIP") != NULL;
             }
-            if ((gsAnchor == 9 || (gsAnchor >= 11 && gsAnchor <= 16)) && !noclip) {
+            if ((gsAnchor == 9 || (gsAnchor >= 11 && gsAnchor <= 17)) && !noclip) {
                 /* and what lies beyond the page's edge (plates sliding in) stays out of sight, as on the 4:3 screen */
                 int lo = (int)((pivot - pivot * narrow) * (float)SCALE), hi = (int)((pivot + (512.0f - pivot) * narrow) * (float)SCALE + 0.5f);
                 int r = d.scissor[0] + d.scissor[2];
@@ -1978,7 +1981,7 @@ void GsGpu_Native(int effect) {
 
     /* 1 = outline. 2 (the see-through tint) is drawn by the generic table pass now (depth_clut), from the game's
        own table. */
-    if (effect >= 0x22 && effect <= 0x29) { /* widescreen menus: centre / fill / left / right; centre, left, right, bars too; page */
+    if (effect >= 0x22 && effect <= 0x2A) { /* widescreen menus: centre / fill / left / right; centre, left, right, bars too; page; page, top */
         gsAnchor = effect - 0x22 + 9;
         return;
     }

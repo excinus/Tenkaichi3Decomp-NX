@@ -4476,8 +4476,14 @@ converted for it has its 2D at its true shape across the whole width, the way th
   as whole numbers: the game's code passes floats in other registers than the port's C (they arrived as 0). The
   gold clouds in the top corners (a sprite from the screen's top edge in that half, against its edge) go to that
   corner (part `PORT_MENU_PAGE`, anchor 16). Dragon History's page is its scenery, which fills (with its waterfall,
-  shimmer and fish clips). Evolution Z's customising (42) is laid out as character select: its bars at their true
-  shape. A screen's draw can call another's (a backdrop drawn by its own function): the pages stack.
+  shimmer and fish clips). Evolution Z's customising (37) and the Data Center's password (44: its keyboard is one
+  picture as wide as the 4:3 screen, its letters on it) keep their full-width pieces at their true shape too. The
+  user's choices per screen: the Data Center's and Options' plates against the right edge, as their art runs off
+  it (`mc_menu_plate_*`), Options' "EXIT" (`mc_bottom_plate_*`) against the left; the item shop's counters of
+  zenni and of the share collected against the right edge, their digits (`mc_pay_num_*`, `mc_item_num_*`) and
+  their icons and frames, which are the page's own pieces (part `PORT_MENU_PAGE_TOP`, anchor 17: any piece in the
+  top 120 lines starting in the right half). A screen's draw can call another's (a backdrop drawn by its own
+  function): the pages stack.
 - Known: Character Reference's shelves are pieces of the page like its window, so they stay in the middle and meet
   the backdrop at the 4:3 page's edges.
 - Test aids: `BT3_MENU_MODE=<n>` starts the menus at progress mode n (6 Dragon History, 13 Ultimate Battle, 33 World

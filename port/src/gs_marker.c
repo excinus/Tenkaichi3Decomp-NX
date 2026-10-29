@@ -32,10 +32,12 @@ void Port_GsMarker(int effect) {
                        (in the others they fill the width): a bar whose cells hold other pieces
      PORT_MENU_PAGE    as CENTER, and a piece from the top edge against a 4:3 edge, in that half, against that edge
                        (the gold clouds in the corners of the screens from 10 on)
+     PORT_MENU_PAGE_TOP  as PAGE, and any piece in the top 120 lines starting in the right half against the right
+                       edge (the item shop's counters, their icons and frames)
    Which clip of a screen's movie goes where is the table in Port_MenuClipPart, by the clips' names. A screen that
    marks nothing is stretched as before. The renderer acts on the markers only with that layout chosen. */
 enum { PORT_MENU_NONE = -1, PORT_MENU_CENTER, PORT_MENU_FILL, PORT_MENU_LEFT, PORT_MENU_RIGHT, PORT_MENU_CENTER_ALL, PORT_MENU_LEFT_ALL,
-       PORT_MENU_RIGHT_ALL, PORT_MENU_PAGE };
+       PORT_MENU_RIGHT_ALL, PORT_MENU_PAGE, PORT_MENU_PAGE_TOP };
 static int sMenuPart = PORT_MENU_NONE;
 static int sMenuMovie;               /* which of the screen's movies is being drawn (Port_MenuMovie) */
 static int sMenuScreen;              /* PORT_MENU_SCREEN_* of the page being drawn, 0: none */
@@ -84,9 +86,11 @@ void Port_MenuPage(int screen) {
     /* (what a page draws itself, not in a clip, stays in the middle: on most screens its windows and plates. On
        Dragon History, 13, it is the scenery, which fills the width. Character Reference's shelves are such pieces
        too, but so is its window of rows: in the middle, the shelves meet the backdrop at the 4:3 page's edges.) */
-    /* (Evolution Z's character customising, 42, is laid out as character select: its bars at their true shape too) */
-    Port_MenuPart(screen == 0 ? PORT_MENU_NONE : screen == 2 ? PORT_MENU_LEFT : screen == 3 || screen == 42 ? PORT_MENU_CENTER_ALL
-                                                : screen == 13 ? PORT_MENU_FILL : screen >= 10 ? PORT_MENU_PAGE : PORT_MENU_CENTER);
+    /* (Evolution Z's character customising, 37, is laid out as character select: its bars at their true shape too;
+       the Data Center's password, 44: its keyboard is one picture as wide as the 4:3 screen, its letters on it) */
+    Port_MenuPart(screen == 0 ? PORT_MENU_NONE : screen == 2 ? PORT_MENU_LEFT : screen == 3 || screen == 37 || screen == 44 ? PORT_MENU_CENTER_ALL
+                                                : screen == 13 ? PORT_MENU_FILL : screen == 38 ? PORT_MENU_PAGE_TOP
+                                                : screen >= 10 ? PORT_MENU_PAGE : PORT_MENU_CENTER);
 }
 
 /* Backdrops: on, and back to the page's part */
@@ -168,6 +172,16 @@ int Port_MenuClipPart(const char *name, int x, int top) {
             !starts(name, "mc_face_mask_")) {
             return name[n - 1] == 'l' ? PORT_MENU_LEFT : PORT_MENU_RIGHT;
         }
+    }
+    if (sMenuScreen == 38 && top && (starts(name, "mc_pay_num_") || starts(name, "mc_shop_num_") || starts(name, "mc_item_num_"))) {
+        return PORT_MENU_RIGHT; /* (the item shop: the digits of its counters of zenni and of the share collected; their
+                                   frames are the page's own pieces, PORT_MENU_PAGE_TOP) */
+    }
+    if ((sMenuScreen == 43 || sMenuScreen == 39) && top && starts(name, "mc_menu_plate_")) {
+        return PORT_MENU_RIGHT; /* (the Data Center, Options: their plates reach the right edge, as their art shows) */
+    }
+    if (sMenuScreen == 39 && top && starts(name, "mc_bottom_plate_")) {
+        return PORT_MENU_LEFT; /* (Options: "EXIT" below them, from the left) */
     }
     if (sMenuScreen >= 10 && top && (starts(name, "mc_title") || strcmp(name, "mc_icon") == 0)) {
         return PORT_MENU_LEFT; /* (the title row against the left edge, as on the main menu) */
