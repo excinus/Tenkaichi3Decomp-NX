@@ -302,6 +302,8 @@ void *Port_Window = __start__ - 0x20000000;
    - bt3_env.txt in its folder, if there is one, sets the environment variables the PC builds take from the shell:
      one NAME=value per line, # for a comment (for tests, e.g. BT3_DEMO=1 and BT3_GS=none for the demo fight).
    The folder is the working folder: libnx starts there, the launcher naming the program by its full path. */
+static void watch_start(void);
+
 __attribute__((constructor(101))) static void nx_start(void) {
     FILE *f;
     char line[1024];
@@ -323,6 +325,7 @@ __attribute__((constructor(101))) static void nx_start(void) {
             setvbuf(stderr, NULL, _IOLBF, 0);
         }
     }
+    watch_start();
     f = fopen("bt3_env.txt", "r");
     if (f == NULL) {
         return;
@@ -392,53 +395,106 @@ static void game_main(void) {
     sResult = __real_main(sArgc, sArgv);
 }
 
-/* A thread of its own beside the game, twice a second:
-   - the log onto the card (fsync): what the game wrote is kept even when it is ended from outside (HOME, or the
-     console turned off) while it hangs;
-   - when the game has drawn nothing for 3 seconds (a hang, or a long load), a line in the log saying so, with how far
-     the start had got, again every 30 seconds while it lasts, and one when it draws again;
-   - every 2 seconds for the first 3 minutes, and after that when the game draws nothing or calls the file service
-     more than 2000 times a second, a line in bt3_watch.txt (opened and closed each time, so that it is on the card
-     whatever happens to the log): the time, how late the thread woke (a busy processor), the frame counters, and
-     the file service's calls (plat_nxfs.c). The first kits of phase 4 hung the console with nothing in the log,
-     even with the fsync; this says what the program was doing. */
-extern int NxFs_Report(FILE *f, unsigned ms);
+int __wrap_main(int argc, char **argv) {
+    extern void Port_WatchStop(void);
+
+    sArgc = argc;
+    sArgv = argv;
+    sGameStackTop = (uint8_t *)Port_Ptr(STACK_BASE + STACK_SIZE);
+    gPortStage = "the game is running (on its stack in the window)";
+    Port_CallOnStack(game_main, sGameStackTop);
+    Port_WatchStop();
+    return sResult;
+}
+
+/* The watch thread: started first of all (nx_start, before the game's data is read and its memory reserved), beside
+   the game until it returns to the launcher. Twice a second:
+   the log onto the card (fsync), so that what the game wrote is kept when it is ended from outside while it hangs;
+   and every 2 seconds for the first 3 minutes, after that when nothing is drawn or the file service is called more
+   than 2000 times a second, a few lines in bt3_watch.txt: the time, how late the thread woke (a busy processor), the
+   frame counters, the start's stage, the file service's calls (plat_nxfs.c), any call that has not come back for a
+   second, and the main thread's last call. bt3_watch.txt is written through libnx's file service directly, not the C
+   library (whose locks a stuck thread of the game may hold): the first kits of phase 4 hung the console with nothing
+   in the log, and in the one before this the watch thread, then started at main() and writing with fopen, did not
+   get to write its first line. (Nothing goes to the log from this thread: the C library's stream has a lock.) */
+extern size_t NxFs_Report(char *out, size_t cap, unsigned ms);
+extern size_t NxFs_Stuck(char *out, size_t cap, unsigned ms);
+extern size_t NxFs_MainLast(char *out, size_t cap);
 extern unsigned long long NxFs_Total(void);
 extern void NxFs_SetThreads(Handle mainThread, Handle watchThread);
+extern Result __real_fsFsDeleteFile(FsFileSystem *fs, const char *p);
+extern Result __real_fsFsRenameFile(FsFileSystem *fs, const char *p, const char *q);
+extern Result __real_fsFsCreateFile(FsFileSystem *fs, const char *p, s64 size, u32 option);
+extern Result __real_fsFsOpenFile(FsFileSystem *fs, const char *p, u32 mode, FsFile *out);
+extern Result __real_fsFileWrite(FsFile *f, s64 off, const void *buf, u64 size, u32 option);
+extern void __real_fsFileClose(FsFile *f);
+static Thread sWatch;
+static int sWatching, sLogFd[2] = {-1, -1};
 static volatile int sWatchStop; /* the game has returned to the launcher */
+static FsFile sWatchFile;
+static s64 sWatchAt = -1; /* where the next line goes; -1: bt3_watch.txt could not be made */
 
-/* (times in milliseconds: this file is built with software float, which has no 64-bit integer to double) */
-static void watch_line(const char *what, unsigned t, unsigned late, unsigned frame, unsigned blank, int report) {
-    FILE *f = fopen("bt3_watch.txt", "a");
+/* bt3_watch.txt (the one before kept as bt3_watch_prev.txt), in the program's folder, by its path in the SD card's
+   file system (sdmc:/atmosphere/contents/<title>/Tenkaichi3Decomp -> /atmosphere/contents/<title>/) */
+static void watch_open(void) {
+    extern int __system_argc;
+    extern char **__system_argv;
+    FsFileSystem *fs = fsdevGetDeviceFileSystem("sdmc");
+    char dir[FS_MAX_PATH], now[FS_MAX_PATH], prev[FS_MAX_PATH];
+    const char *p = __system_argc > 0 && __system_argv[0] != NULL ? __system_argv[0] : "", *colon = strchr(p, ':');
+    char *slash;
 
-    if (f == NULL) {
+    snprintf(dir, sizeof(dir), "%s", colon != NULL ? colon + 1 : p);
+    slash = strrchr(dir, '/');
+    if (fs == NULL || slash == NULL) {
         return;
     }
-    fprintf(f, "%5u.%u s: %s; woke %u ms late; frame %u, blank %u; %s\n", t / 1000, t / 100 % 10, what, late, frame, blank,
-            gPortStage);
-    if (report) {
-        fprintf(f, "         ");
-        if (!NxFs_Report(f, 2000)) {
-            fprintf(f, "file service: no calls\n");
-        }
+    slash[1] = '\0';
+    snprintf(now, sizeof(now), "%sbt3_watch.txt", dir);
+    snprintf(prev, sizeof(prev), "%sbt3_watch_prev.txt", dir);
+    __real_fsFsDeleteFile(fs, prev);
+    __real_fsFsRenameFile(fs, now, prev);
+    if (R_SUCCEEDED(__real_fsFsCreateFile(fs, now, 0, 0)) &&
+        R_SUCCEEDED(__real_fsFsOpenFile(fs, now, FsOpenMode_Write | FsOpenMode_Append, &sWatchFile))) {
+        sWatchAt = 0;
     }
-    fclose(f);
+}
+
+static void watch_write(const char *text, size_t n) {
+    if (sWatchAt >= 0 && n > 0 && R_SUCCEEDED(__real_fsFileWrite(&sWatchFile, sWatchAt, text, n, FsWriteOption_Flush))) {
+        sWatchAt += (s64)n;
+    }
+}
+
+/* (times in milliseconds: this file is built with software float, which has no 64-bit integer to double) */
+static void watch_line(const char *what, unsigned t, unsigned late, int report) {
+    extern unsigned gGsFrame, gPortVBlanks;
+    static char text[2048];
+    size_t at;
+
+    at = (size_t)snprintf(text, sizeof(text), "%5u.%u s: %s; woke %u ms late; frame %u, blank %u; %s\n", t / 1000, t / 100 % 10,
+                          what, late, gGsFrame, gPortVBlanks, gPortStage);
+    if (report && at < sizeof(text)) {
+        at += (size_t)snprintf(text + at, sizeof(text) - at, "         ");
+        at += NxFs_Report(text + at, sizeof(text) - at, 2000);
+        at += NxFs_Stuck(text + at, sizeof(text) - at, 1000);
+        at += NxFs_MainLast(text + at, sizeof(text) - at);
+    }
+    watch_write(text, at < sizeof(text) ? at : sizeof(text) - 1);
 }
 
 static void nx_watch(void *arg) {
     extern unsigned gGsFrame, gPortVBlanks;
-    unsigned frame = gGsFrame, blank = gPortVBlanks, ticks = 0, n = 0;
+    unsigned frame = gGsFrame, blank = gPortVBlanks, ticks = 0, n = 0, late = 0;
     u64 freq = armGetSystemTickFreq() / 1000, start = armGetSystemTick(), was = start;
-    unsigned late = 0;
+    unsigned long long before = 0;
 
     (void)arg;
-    remove("bt3_watch_prev.txt");
-    rename("bt3_watch.txt", "bt3_watch_prev.txt");
-    watch_line("started", 0, 0, frame, blank, 0);
+    watch_open();
+    watch_line("started", 0, 0, 0);
     while (!sWatchStop) {
         u64 now;
         unsigned t, slept;
-        int still;
 
         svcSleepThread(500000000ull);
         now = armGetSystemTick();
@@ -448,58 +504,59 @@ static void nx_watch(void *arg) {
             late = slept - 500; /* (the most in this report's 2 seconds) */
         }
         was = now;
-        fsync(fileno(stderr));
-        fsync(fileno(stdout));
-        still = gGsFrame == frame && gPortVBlanks == blank;
-        if (!still) {
-            if (ticks >= 6) {
-                fprintf(stderr, "bt3: watch: drawing again after %u.%u s\n", ticks / 2, ticks % 2 * 5);
-            }
+        if (sLogFd[0] >= 0) {
+            fsync(sLogFd[0]);
+        }
+        if (sLogFd[1] >= 0) {
+            fsync(sLogFd[1]);
+        }
+        if (gGsFrame != frame || gPortVBlanks != blank) {
             frame = gGsFrame;
             blank = gPortVBlanks;
             ticks = 0;
-        } else if (++ticks == 6 || (ticks > 6 && ticks % 60 == 6)) {
-            fprintf(stderr, "bt3: watch: nothing drawn for %u s (frame %u, blank %u; %s)\n", ticks / 2, frame, blank, gPortStage);
+        } else {
+            ticks++;
         }
         if (++n % 4 == 0) { /* (every 2 seconds) */
-            static unsigned long long before;
             unsigned long long total = NxFs_Total();
             if (t < 180000 || ticks >= 4 || total - before > 4000) {
-                watch_line(ticks >= 4 ? "nothing drawn" : "running", t, late, gGsFrame, gPortVBlanks, 1);
+                watch_line(ticks >= 4 ? "nothing drawn" : "running", t, late, 1);
             } else {
-                NxFs_Report(NULL, 2000); /* (the counts start again for the next report) */
+                NxFs_Report(NULL, 0, 2000); /* (the counts start again for the next report) */
             }
-            before = NxFs_Total();
+            before = total;
             late = 0;
         }
     }
+    watch_line("the game returned to the launcher", (unsigned)((armGetSystemTick() - start) / freq), 0, 0);
+    if (sWatchAt >= 0) {
+        __real_fsFileClose(&sWatchFile);
+    }
 }
 
-int __wrap_main(int argc, char **argv) {
-    static Thread watch;
-    int watching = 0;
-
-    sArgc = argc;
-    sArgv = argv;
-    /* (core 1: the game is on core 0, its sound on core 2; a priority above the C library's threads) */
-    if (R_SUCCEEDED(threadCreate(&watch, nx_watch, NULL, NULL, 0x10000, 0x2D, 1)) ||
-        R_SUCCEEDED(threadCreate(&watch, nx_watch, NULL, NULL, 0x10000, 0x2D, -2)) ||
-        R_SUCCEEDED(threadCreate(&watch, nx_watch, NULL, NULL, 0x10000, 0x3B, -2))) {
-        NxFs_SetThreads(threadGetCurHandle(), watch.handle);
-        watching = R_SUCCEEDED(threadStart(&watch));
+/* From nx_start, once the log is set up. (Core 1: the game is on core 0, its sound on core 2; a priority above the
+   C library's threads.) */
+static void watch_start(void) {
+    sLogFd[0] = fileno(stdout);
+    sLogFd[1] = fileno(stderr);
+    if (R_SUCCEEDED(threadCreate(&sWatch, nx_watch, NULL, NULL, 0x10000, 0x2D, 1)) ||
+        R_SUCCEEDED(threadCreate(&sWatch, nx_watch, NULL, NULL, 0x10000, 0x2D, -2)) ||
+        R_SUCCEEDED(threadCreate(&sWatch, nx_watch, NULL, NULL, 0x10000, 0x3B, -2))) {
+        NxFs_SetThreads(threadGetCurHandle(), sWatch.handle);
+        sWatching = R_SUCCEEDED(threadStart(&sWatch));
     }
-    if (!watching) {
+    if (!sWatching) {
         fprintf(stderr, "bt3: watch: the thread did not start\n");
     }
-    sGameStackTop = (uint8_t *)Port_Ptr(STACK_BASE + STACK_SIZE);
-    gPortStage = "the game is running (on its stack in the window)";
-    Port_CallOnStack(game_main, sGameStackTop);
-    if (watching) {
+}
+
+void Port_WatchStop(void) {
+    if (sWatching) {
         sWatchStop = 1;
-        threadWaitForExit(&watch);
-        threadClose(&watch);
+        threadWaitForExit(&sWatch);
+        threadClose(&sWatch);
+        sWatching = 0;
     }
-    return sResult;
 }
 
 #else

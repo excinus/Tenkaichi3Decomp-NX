@@ -314,6 +314,9 @@ static const char *load(const char *path, Handle self, uint64_t w, uint64_t *ent
     if (f == NULL) {
         return "it cannot be opened";
     }
+    /* (in pieces of 1 MB: the C library's own buffer is 1 KB, which made reading the program some 13,000 requests
+       to the SD card, slowing the whole console while they lasted) */
+    setvbuf(f, NULL, _IOFBF, 1 << 20);
     if (fread(&h, sizeof(h), 1, f) != 1 || memcmp(h.ident, "\177ELF\2\1", 6) != 0 || h.machine != 183 /* AArch64 */ ||
         h.type != 2 /* executable */ || h.phentsize != sizeof(ElfSegment) || h.phnum == 0 || h.phnum > 16 ||
         fseek(f, (long)h.phoff, SEEK_SET) != 0 || fread(seg, sizeof(ElfSegment), h.phnum, f) != h.phnum) {
@@ -533,6 +536,7 @@ int main(int argc, char **argv) {
 
     screen_open();
     printf(CONSOLE_YELLOW "Tenkaichi3Decomp" CONSOLE_RESET " - launcher\n\n");
+    consoleUpdate(NULL);
     if (!find_game(argc, argv, folder, sizeof(folder))) {
         return fail("The game's program was not found. It is looked for:\n"
                     "  next to this launcher, as " PROGRAM ",\n  and as " TITLE_FOLDER "/" PROGRAM "\n"
@@ -559,6 +563,9 @@ int main(int argc, char **argv) {
         return 1;
     }
     printf("Window: %#" PRIx64 "%s\n", window, window == WINDOW ? "" : " (the usual one was in use this time)");
+    printf("Loading the game...\n");
+    consoleUpdate(NULL);
+    t0 = armGetSystemTick();
     virtmemLock();
     virtmemAddReservation((void *)window, GB4);
     virtmemUnlock();
@@ -567,8 +574,10 @@ int main(int argc, char **argv) {
         return fail("%s: %s.\n", path, why);
     }
     snprintf(sArgv, sizeof(sArgv), "\"%s\"", path);
-    printf("Loaded at %#" PRIx64 " (%d segments); %" PRIu64 " MB for the game.\n", entry, sSegCount, sGameHeapSize >> 20);
-    printf("\nThe game runs now. Its output goes to bt3_log.txt in its folder.\n");
+    printf("Loaded at %#" PRIx64 " (%d segments) in %" PRIu64 " ms; %" PRIu64 " MB for the game.\n", entry, sSegCount,
+           (uint64_t)(armTicksToNs(armGetSystemTick() - t0) / 1000000u), sGameHeapSize >> 20);
+    printf("\nThe game runs now. Its output goes to bt3_log.txt in its folder, and what it is doing to\n"
+           "bt3_watch.txt.\n");
     consoleUpdate(NULL);
 
     t0 = armGetSystemTick();

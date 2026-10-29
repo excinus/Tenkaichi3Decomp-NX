@@ -47,10 +47,10 @@ def link_mac(objs, extra):
     moved = [f"-Wl,-segaddr,{s},{MAC_BASE + a - first:#x}" for s, a, _ in segs if s != "__LINKEDIT"]
     return subprocess.run(cmd + moved, capture_output=True, text=True)
 
-# libnx's file service calls, counted by port/src/plat_nxfs.c
+# libnx's file service calls, counted by port/src/plat_nxfs.c, and fopen (its files get a larger buffer there)
 NX_FS_WRAPPED = ["fsFsCreateFile", "fsFsDeleteFile", "fsFsCreateDirectory", "fsFsRenameFile", "fsFsRenameDirectory",
                  "fsFsGetEntryType", "fsFsGetFileTimeStampRaw", "fsFsOpenFile", "fsFsOpenDirectory", "fsFileRead",
-                 "fsFileWrite", "fsFileFlush", "fsFileGetSize", "fsFileSetSize", "fsFileClose", "fsDirRead", "fsDirClose"]
+                 "fsFileWrite", "fsFileFlush", "fsFileGetSize", "fsFileSetSize", "fsFileClose", "fsDirRead", "fsDirClose", "fopen"]
 
 def link_nx(objs, extra):
     """The Switch: devkitA64's linker with libnx, NOT position-independent (port/switch/nx.specs: libnx's own specs

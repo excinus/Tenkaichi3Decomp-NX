@@ -458,3 +458,22 @@ console stays usable and the program goes on, slower); and the watch thread writ
 `bt3_watch.txt` (opened and closed each time) with the counts, how late it woke, the frame counters and the start's
 stage. A flood of file calls shows there by kind and path; a console slowed by something else (the GPU, a busy
 processor) shows as few calls with nothing drawn, or the thread waking late.
+
+The kit of commit 97da336: no `bt3_watch.txt` at all, the log empty again. The player's answers: no text of the
+launcher on the screen before the black; the console slow for about the first minute only, then normal while the
+game stays black; the same after a restart of the console, every time. So nothing stays jammed between starts, and
+the watch thread (then started at the top of main()) never wrote its first line. What the code shows:
+- the launcher draws its screen only once the program is loaded (its first `consoleUpdate`), so a black screen from
+  the start does not say where it is;
+- newlib's buffered reads ask the file service for 1 KB at a time, whatever the size asked for (`__swhatbuf_r`:
+  `BUFSIZ`, 1024; `fread` refills the buffer in a loop; only an unbuffered stream reads straight into the caller's
+  memory): the launcher reading the 13.8 MB program was some 13,500 requests to the card, and the game's start
+  (its disc's programs, 2388 runs from them, then its files) many more; enough to keep the console's menus waiting
+  for the first minute;
+- a thread of the game stuck while holding one of the C library's locks (`fopen` takes a lock of all the streams)
+  would stop the watch thread at its first `fopen`, before anything reached the card, the log's `fsync` included.
+The next kit: the launcher shows its lines at once and reads the program in 1 MB pieces (`setvbuf`), with the time
+it took; the game's `fopen` is wrapped to give every file a 32 KB buffer; the watch thread starts first of all
+(`nx_start`, before the game's data is read) and writes `bt3_watch.txt` through libnx's file service directly (no C
+library lock), with any file call under way for over a second (its kind and path, main thread or another) and the
+main thread's last file call.

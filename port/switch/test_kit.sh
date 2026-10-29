@@ -79,6 +79,8 @@ its setup made from your disc). If you ran an earlier kit, the gamedata folder i
 2. If it is not there yet: copy the gamedata folder of your PC installation into
    atmosphere/contents/0100B73DEC000000/  on the card, next to Tenkaichi3Decomp.
 3. On the Switch, start the homebrew menu THROUGH A GAME (hold R while starting any game), then "Tenkaichi3Decomp".
+   The launcher shows a few lines while it loads the game (it says how long that took), then the screen is black
+   while the game reads its data.
 4. Play. The controllers work as a PS2 pad by position (B is Cross, A is Circle, Y is Square, X is Triangle;
    L/R and ZL/ZR are L1/R1 and L2/R2). + and - pressed together open the settings window (what the PC opens with
    its F1 key): the D-pad moves, B (Cross) selects, A (Circle) goes back, L/R change the tab, and the touch screen
