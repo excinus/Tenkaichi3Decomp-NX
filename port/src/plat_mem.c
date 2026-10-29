@@ -397,12 +397,14 @@ static void game_main(void) {
      console turned off) while it hangs; without it the card's file stayed empty (the first console run of phase 4);
    - when the game has drawn nothing for 3 seconds (a hang, or a long load), a line in the log saying so, with how far
      the start had got, again every 30 seconds while it lasts, and one when it draws again. */
+static volatile int sWatchStop; /* the game has returned to the launcher */
+
 static void nx_watch(void *arg) {
     extern unsigned gGsFrame, gPortVBlanks;
     unsigned frame = gGsFrame, blank = gPortVBlanks, ticks = 0;
 
     (void)arg;
-    for (;;) {
+    while (!sWatchStop) {
         svcSleepThread(500000000ull);
         fsync(fileno(stderr));
         fsync(fileno(stdout));
@@ -421,6 +423,7 @@ static void nx_watch(void *arg) {
 
 int __wrap_main(int argc, char **argv) {
     static Thread watch;
+    int watching = 0;
 
     sArgc = argc;
     sArgv = argv;
@@ -428,11 +431,16 @@ int __wrap_main(int argc, char **argv) {
     if (R_SUCCEEDED(threadCreate(&watch, nx_watch, NULL, NULL, 0x10000, 0x2D, 1)) ||
         R_SUCCEEDED(threadCreate(&watch, nx_watch, NULL, NULL, 0x10000, 0x2D, -2)) ||
         R_SUCCEEDED(threadCreate(&watch, nx_watch, NULL, NULL, 0x10000, 0x3B, -2))) {
-        threadStart(&watch);
+        watching = R_SUCCEEDED(threadStart(&watch));
     }
     sGameStackTop = (uint8_t *)Port_Ptr(STACK_BASE + STACK_SIZE);
     gPortStage = "the game is running (on its stack in the window)";
     Port_CallOnStack(game_main, sGameStackTop);
+    if (watching) {
+        sWatchStop = 1;
+        threadWaitForExit(&watch);
+        threadClose(&watch);
+    }
     return sResult;
 }
 
