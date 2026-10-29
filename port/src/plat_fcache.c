@@ -15,6 +15,7 @@
 extern void Port_StateTouch(void *p, unsigned long n); /* gs/state.c */
 
 extern const char *Port_FileRoot(void); /* plat_file.c: BT3_DATA or "gamedata" */
+extern const char *volatile gPortWhere; /* plat_stub.c */
 
 enum { SLOTS = 32 };
 static struct { char rel[128]; FILE *fp; long size; unsigned long used; } sSlot[SLOTS];
@@ -101,11 +102,13 @@ static int slot_of(const char *rel) {
 long Port_FileSize(const char *rel) {
     long size;
     int i;
+    gPortWhere = "opening a game file";
     while (__sync_lock_test_and_set(&sLock, 1)) {
     }
     i = slot_of(rel);
     size = i < 0 ? -1 : sSlot[i].size;
     __sync_lock_release(&sLock);
+    gPortWhere = "the game's code, after opening a game file";
     return size;
 }
 
@@ -113,6 +116,7 @@ long Port_FileSize(const char *rel) {
 size_t Port_FileReadAt(const char *rel, long offset, void *buf, size_t bytes) {
     size_t got = 0;
     int i;
+    gPortWhere = "reading a game file";
     while (__sync_lock_test_and_set(&sLock, 1)) {
     }
     i = slot_of(rel);
@@ -121,5 +125,6 @@ size_t Port_FileReadAt(const char *rel, long offset, void *buf, size_t bytes) {
         got = fread(buf, 1, bytes, sSlot[i].fp);
     }
     __sync_lock_release(&sLock);
+    gPortWhere = "the game's code, after reading a game file";
     return got;
 }

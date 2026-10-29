@@ -286,7 +286,8 @@ int __wrap_main(int argc, char **argv) {
      - pages are 4 KB; the memory is cleared, as mmap's is;
      - the game's main() runs on a stack in the window, on the main thread, as on macOS. */
 #include <malloc.h> /* memalign */
-#include <unistd.h> /* chdir, fsync */
+#include <fcntl.h>  /* open */
+#include <unistd.h> /* chdir, fsync, dup2 */
 #include <switch.h>
 
 /* The window's base for the game's code (port/tools/macwin/macwin.cpp loads it in every function): 0x20000000 below
@@ -315,13 +316,18 @@ __attribute__((constructor(101))) static void nx_start(void) {
 
     remove("bt3_log_prev.txt");
     rename("bt3_log.txt", "bt3_log_prev.txt");
-    f = fopen("bt3_log.txt", "w");
-    if (f != NULL) {
-        fclose(f);
-        if (freopen("bt3_log.txt", "a", stdout) != NULL) {
+    /* Opened once, as descriptors 1 and 2 (stdout's and stderr's): the Switch's file system lets only one handle
+       write a file, so a second freopen of the same file failed and closed stderr, and everything the program
+       wrote there (nearly all of its output) was lost from phase 4's first run on. */
+    {
+        int fd = open("bt3_log.txt", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (fd >= 0) {
+            fflush(stdout);
+            fflush(stderr);
+            dup2(fd, 1);
+            dup2(fd, 2);
+            close(fd);
             setvbuf(stdout, NULL, _IOLBF, 0);
-        }
-        if (freopen("bt3_log.txt", "a", stderr) != NULL) {
             setvbuf(stderr, NULL, _IOLBF, 0);
         }
     }
@@ -472,8 +478,9 @@ static void watch_line(const char *what, unsigned t, unsigned late, int report) 
     static char text[2048];
     size_t at;
 
-    at = (size_t)snprintf(text, sizeof(text), "%5u.%u s: %s; woke %u ms late; frame %u, blank %u; %s\n", t / 1000, t / 100 % 10,
-                          what, late, gGsFrame, gPortVBlanks, gPortStage);
+    extern const char *volatile gPortWhere; /* plat_stub.c: where the game's thread is, roughly */
+    at = (size_t)snprintf(text, sizeof(text), "%5u.%u s: %s; woke %u ms late; frame %u, blank %u; %s; the game's thread: %s\n",
+                          t / 1000, t / 100 % 10, what, late, gGsFrame, gPortVBlanks, gPortStage, gPortWhere);
     if (report && at < sizeof(text)) {
         at += (size_t)snprintf(text + at, sizeof(text) - at, "         ");
         at += NxFs_Report(text + at, sizeof(text) - at, 2000);
@@ -537,8 +544,7 @@ static void nx_watch(void *arg) {
 /* From nx_start, once the log is set up. (Core 1: the game is on core 0, its sound on core 2; a priority above the
    C library's threads.) */
 static void watch_start(void) {
-    sLogFd[0] = fileno(stdout);
-    sLogFd[1] = fileno(stderr);
+    sLogFd[0] = 2; /* (stdout's and stderr's descriptors are the one file: nx_start) */
     if (R_SUCCEEDED(threadCreate(&sWatch, nx_watch, NULL, NULL, 0x10000, 0x2D, 1)) ||
         R_SUCCEEDED(threadCreate(&sWatch, nx_watch, NULL, NULL, 0x10000, 0x2D, -2)) ||
         R_SUCCEEDED(threadCreate(&sWatch, nx_watch, NULL, NULL, 0x10000, 0x3B, -2))) {

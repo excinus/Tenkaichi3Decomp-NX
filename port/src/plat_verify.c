@@ -282,6 +282,16 @@ void Port_VerifyStart(void) {
     if (v == NULL && gs != NULL && strcmp(gs, "none") == 0) {
         return;
     }
+#ifdef __SWITCH__
+    /* The Switch: only with BT3_VERIFY=1. Each of the 137,210 looks at a file (the 68,605 files and their place
+       under mods/) is about five requests to the SD card's file service there, and the full comparison reads 3 GB
+       through it: the pass took minutes, and while it ran the file service had a queue of seconds for the game's
+       own reads and the console's menus alike (the console slowed down, the game stood still on a black screen;
+       docs/port/switch_plan.md, "Results"). The fingerprint is for online play, not there yet on the Switch. */
+    if (v == NULL) {
+        return;
+    }
+#endif
     if (v != NULL && atoi(v) == 0) {
         sCheck = 0; /* no comparison with the disc, no notice; the fingerprint is still computed */
     }

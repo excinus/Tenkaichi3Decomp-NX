@@ -477,3 +477,25 @@ it took; the game's `fopen` is wrapped to give every file a 32 KB buffer; the wa
 (`nx_start`, before the game's data is read) and writes `bt3_watch.txt` through libnx's file service directly (no C
 library lock), with any file call under way for over a second (its kind and path, main thread or another) and the
 main thread's last file call.
+
+The kit of commit c1f9186: the launcher's lines showed (for a moment: "Window: 0x300000000 (the usual one was in use
+this time)", "Loading the game..."), and `bt3_watch.txt` came back. What it says:
+- the main thread drew 69 frames, made its last file call at 2.7 s (`stat` of `saves/card1/BASLUS-21678DBZT3`, the
+  memory card's check at boot) and then neither drew nor called the file service again for the 80 s the run lasted;
+- another thread called the file service without pause: open, entry type, time stamp, get size, close, file after
+  file of `gamedata/pzs3us1/` and `pzs3us2/` (`stat` of every file), 2000 to 20,000 calls a second, while single
+  reads of the game's waited in the service's queue for 1.4 to 7 s, and the watch thread's own writes made it wake
+  up to 17 s late. That thread is the game data check (`plat_verify.c`): at every start a `stat` of each of the
+  68,605 files of the disc and of its place under `mods/`, and when their sizes and times differ from the ones
+  kept in `.verified` (as on a first start anywhere) a read of all 3 GB. Instant on a PC; on the Switch each `stat`
+  is about five requests to the file service and the pass takes minutes;
+- the log was empty because it never got anything: in the whole run not one write. `nx_start` opened bt3_log.txt
+  twice (freopen for stdout, then for stderr); the Switch's file system lets one handle write a file, so the second
+  freopen failed, which closed stderr, where the program writes nearly all it says. (Phase 3's two lines are
+  printed to stdout.)
+Changed: the check runs on the Switch only with `BT3_VERIFY=1` (its fingerprint is for online play, phase 6; a
+cheaper check there would list each folder once, `fsDirRead` giving every file's size, rather than `stat` each
+file); the log is opened once and made descriptors 1 and 2 (`dup2`); and `gPortWhere` (plat_stub.c) marks where
+the game's thread is among the port's main parts (the blank, the controllers, game files, the memory card, the
+sound's stream locks, a texture's decoding, the picture), reported by the watch thread, should the main thread
+still stand still with the file service quiet.

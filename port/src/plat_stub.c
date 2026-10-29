@@ -347,7 +347,13 @@ static void late_wait(void) {
         PortInput_Fresh(); /* the controllers and keys as they are now, not as they were when the last picture was shown */
     }
 }
+/* Where the game's thread is, roughly: set where it enters and leaves the port's main parts (the blank, the
+   controllers, the files, the memory card, the sound's locks, a texture's decoding, the picture), for the Switch's
+   watch thread (plat_mem.c) to report when the game stops drawing. (Not game state: PORT_HOST.) */
+PORT_HOST const char *volatile gPortWhere = "starting";
+
 void Port_VBlank(void) {
+    gPortWhere = "the blank (sceGsSyncV)";
     Port_LagMark('W'); /* (the game has come to wait for a blank) */
     {
         extern void Port_SessionPoll(void); /* gs/state.c: the state at the first blank is kept; an online session
@@ -439,6 +445,7 @@ void Port_VBlank(void) {
     if (sVsyncHandler != NULL) {
         sVsyncHandler(0);
     }
+    gPortWhere = "the game's code, after a blank";
 }
 int sceGsSyncV() { Port_VBlank(); return 0; }
 

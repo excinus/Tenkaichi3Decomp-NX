@@ -446,6 +446,8 @@ static struct { SDL_JoystickID id; SDL_Gamepad *pad; } sOpen[MAX_PADS];
 static SDL_JoystickID sIds[MAX_PADS];
 static int sIdCount, sInit;
 
+extern const char *volatile gPortWhere; /* plat_stub.c */
+
 static void pads_refresh(void) {
     static unsigned calls;
     SDL_JoystickID *ids;
@@ -1016,6 +1018,7 @@ int Port_PadRead(int socket, unsigned char *data) {
     if (!GsGpu_Enabled() || socket < 0 || socket > 1) {
         return 0;
     }
+    gPortWhere = "reading the controllers";
     pthread_once(&sLoadOnce, load);
     pads_refresh();
     if (sSwallow) { /* the buttons that opened or closed the settings window are not the game's (START would pause) */
@@ -1112,5 +1115,6 @@ int Port_PadRead(int socket, unsigned char *data) {
     data[0] = (unsigned char)(~btn & 0xFF);       /* active low */
     data[1] = (unsigned char)(~(btn >> 8) & 0xFF);
     data[2] = rx; data[3] = ry; data[4] = lx; data[5] = ly;
+    gPortWhere = "the game's code, after reading the controllers";
     return 18;
 }

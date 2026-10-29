@@ -552,6 +552,8 @@ static void *tex_decode_worker(void *unused) {
 }
 
 static void tex_decode(const TexDecode *d) {
+    extern const char *volatile gPortWhere; /* plat_stub.c */
+    gPortWhere = "decoding a texture";
     if (sDecWorkers < 0) {
         const char *e = getenv("BT3_TEX_THREADS");
         int n = e != NULL ? atoi(e) : SDL_GetNumLogicalCPUCores() - 2, i;
@@ -4714,6 +4716,8 @@ static void skip_decide(void) {
 }
 
 void GsGpu_FrameEnd(void) {
+    extern const char *volatile gPortWhere; /* plat_stub.c */
+    gPortWhere = "showing a picture (the frame's end)";
     sInGlowChain = 0; /* (a chain is always within one frame) */
     if (gPortResim) { /* a frame that is only being re-run: nothing was recorded, nothing is shown */
         return;
