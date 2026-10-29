@@ -73,10 +73,10 @@ WIN_README = README.replace("(Linux, 64-bit)", "(Windows, 64-bit)").replace("Sta
 
 MAC_README = README.replace("(Linux, 64-bit)", "(macOS, Apple Silicon) - EXPERIMENTAL") \
     .replace("1. Start  Tenkaichi3Decomp-setup\n", """0. macOS blocks programs downloaded from the internet that are not signed by Apple, and this one is not.
-   Once, in Terminal (drag this folder onto the window after the command to fill in its place):
+   Start the setup once with right-click > Open, then "Open" (or: System Settings > Privacy & Security > Open
+   Anyway); it then lets the rest of this folder through itself. If something is still refused, once in Terminal
+   (drag this folder onto the window after the command to fill in its place):
        xattr -dr com.apple.quarantine <this folder>
-   Or start each program once with right-click > Open, then "Open" (also: System Settings > Privacy & Security >
-   Open Anyway).
 1. Start  Tenkaichi3Decomp-setup  (double-click; it opens a Terminal window beside the setup window)
 """).replace("libprism.so", "libprism.dylib") \
     .replace("Updates: once per start the game asks GitHub", "Updates: the Mac version does not install updates itself yet: download the new release by hand.\nOn Linux and Windows, once per start the game asks GitHub")
@@ -300,6 +300,10 @@ def main_mac():
             tool("install_name_tool", "-add_rpath", "@executable_path/lib", str(f))
     for f in (out / "lib/libSDL3.0.dylib", out / NAME, out / "Tenkaichi3Decomp-setup"):
         tool("codesign", "--force", "--sign", "-", str(f))
+    # macOS on Apple Silicon kills a program whose page zero is missing before it starts (no message): 4 GB, as linked
+    seg = re.search(r"segname __PAGEZERO\n\s+vmaddr \S+\n\s+vmsize (\S+)", tool("otool", "-l", str(out / NAME)))
+    if seg is None or int(seg.group(1), 16) != 0x100000000:
+        sys.exit(f"{NAME}: its __PAGEZERO is {seg.group(1) if seg else 'missing'}, not 4 GB: macOS would kill it at start")
     # nothing may still point into Homebrew: a player has no Homebrew
     left = [f"{f.name}: {line.strip()}" for f in (out / NAME, out / "Tenkaichi3Decomp-setup", out / "lib/libSDL3.0.dylib")
             for line in tool("otool", "-L", str(f)).splitlines()[1:] if "/opt/homebrew" in line or "/usr/local/" in line]

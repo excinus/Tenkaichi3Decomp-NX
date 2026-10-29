@@ -37,7 +37,10 @@ def link_mac(objs, extra):
     sdl = os.environ.get("BT3_SDL3", "/opt/homebrew/opt/sdl3")
     cmd = ["clang", "-arch", "arm64", "-mmacosx-version-min=11.0", "-w", "-o", str(EXE)] + extra + objs + \
           [f"-L{sdl}/lib", "-lSDL3", "-lc++", f"-Wl,-rpath,{sdl}/lib", "-Wl,-rpath,@executable_path/lib",
-           "-Wl,-e,___wrap_main", "-Wl,-export_dynamic", f"-Wl,-map,{EXE}.map"]
+           "-Wl,-e,___wrap_main", "-Wl,-export_dynamic", f"-Wl,-map,{EXE}.map",
+           # a page zero of 4 GB, said explicitly: the program is moved to 1 TB with -segaddr below, and a link where
+           # the page zero came out 0 bytes (seen in the release build) is killed by macOS before it starts
+           "-Wl,-pagezero_size,0x100000000"]
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode:
         return r

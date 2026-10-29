@@ -543,6 +543,12 @@ static void page_done() {
         if (game != NULL) {
             SDL_DestroyProcess(game);
             sQuit = true;
+        } else {
+            sError = std::string("The game could not be started: ") + SDL_GetError();
+#ifdef __APPLE__
+            sError += "\nmacOS may still be blocking it: see step 0 of README.txt (xattr -dr com.apple.quarantine on this folder).";
+#endif
+            sPage = PAGE_FAILED;
         }
     }
 }
@@ -837,6 +843,19 @@ int main(int argc, char **argv) {
         ImGui_ImplSDLGPU3_Init(&info);
     }
     sRoot = find_root();
+#ifdef __APPLE__
+    if (sRelease) {
+        // A folder downloaded from the internet is marked "quarantined" by macOS, and a quarantined program started by
+        // another one is refused (posix_spawn: Bad file descriptor), the game included. This setup has been let through
+        // already (it runs): the mark is taken off the whole folder, as README.txt's step 0 does by hand.
+        const char *args[] = {"/usr/bin/xattr", "-dr", "com.apple.quarantine", sRoot.c_str(), NULL};
+        SDL_Process *x = SDL_CreateProcess(args, false);
+        if (x != NULL) {
+            SDL_WaitProcess(x, true, NULL);
+            SDL_DestroyProcess(x);
+        }
+    }
+#endif
     if (sRelease && Native_Installed(sRoot) && getenv("BT3_SETUP_ISO") == NULL) { // nothing left to do: offer Play
         reset_rows();
         for (auto &r : sRows) {
