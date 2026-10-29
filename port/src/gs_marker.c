@@ -34,10 +34,13 @@ void Port_GsMarker(int effect) {
                        (the gold clouds in the corners of the screens from 10 on)
      PORT_MENU_PAGE_TOP  as PAGE, and any piece in the top 120 lines starting in the right half against the right
                        edge (the item shop's counters, their icons and frames)
+     PORT_MENU_PAGE_EDGE  as PAGE, and a piece cut off at the 4:3 screen's right edge (starting right of 200) against
+                       the right edge, at its left edge (ending left of 312) against the left: frames whose art is
+                       cut there (World Tour's timer, Character Reference's list)
    Which clip of a screen's movie goes where is the table in Port_MenuClipPart, by the clips' names. A screen that
    marks nothing is stretched as before. The renderer acts on the markers only with that layout chosen. */
 enum { PORT_MENU_NONE = -1, PORT_MENU_CENTER, PORT_MENU_FILL, PORT_MENU_LEFT, PORT_MENU_RIGHT, PORT_MENU_CENTER_ALL, PORT_MENU_LEFT_ALL,
-       PORT_MENU_RIGHT_ALL, PORT_MENU_PAGE, PORT_MENU_PAGE_TOP };
+       PORT_MENU_RIGHT_ALL, PORT_MENU_PAGE, PORT_MENU_PAGE_TOP, PORT_MENU_PAGE_EDGE };
 static int sMenuPart = PORT_MENU_NONE;
 static int sMenuMovie;               /* which of the screen's movies is being drawn (Port_MenuMovie) */
 static int sMenuScreen;              /* PORT_MENU_SCREEN_* of the page being drawn, 0: none */
@@ -88,8 +91,11 @@ void Port_MenuPage(int screen) {
        too, but so is its window of rows: in the middle, the shelves meet the backdrop at the 4:3 page's edges.) */
     /* (Evolution Z's character customising, 37, is laid out as character select: its bars at their true shape too;
        the Data Center's password, 44: its keyboard is one picture as wide as the 4:3 screen, its letters on it) */
-    Port_MenuPart(screen == 0 ? PORT_MENU_NONE : screen == 2 ? PORT_MENU_LEFT : screen == 3 || screen == 37 || screen == 44 ? PORT_MENU_CENTER_ALL
+    /* (the character selects of Ultimate Battle and the World Tournament, 15, 19, 23, 24, 25, as character select) */
+    Port_MenuPart(screen == 0 ? PORT_MENU_NONE : screen == 2 ? PORT_MENU_LEFT
+                  : screen == 3 || screen == 37 || screen == 44 || screen == 15 || screen == 19 || (screen >= 23 && screen <= 25) ? PORT_MENU_CENTER_ALL
                                                 : screen == 13 ? PORT_MENU_FILL : screen == 38 ? PORT_MENU_PAGE_TOP
+                                                : screen == 17 || screen == 20 ? PORT_MENU_PAGE_EDGE
                                                 : screen >= 10 ? PORT_MENU_PAGE : PORT_MENU_CENTER);
 }
 
@@ -176,6 +182,18 @@ int Port_MenuClipPart(const char *name, int x, int top) {
     if (sMenuScreen == 38 && top && (starts(name, "mc_pay_num_") || starts(name, "mc_shop_num_") || starts(name, "mc_item_num_"))) {
         return PORT_MENU_RIGHT; /* (the item shop: the digits of its counters of zenni and of the share collected; their
                                    frames are the page's own pieces, PORT_MENU_PAGE_TOP) */
+    }
+    if (sMenuScreen == 20 && top && (strcmp(name, "mc_timer") == 0 || starts(name, "mc_taikai") || starts(name, "mc_menu_plate_") ||
+                                     starts(name, "mc_plate_text_") || starts(name, "mc_suji_") || starts(name, "mc_yajirusi_"))) {
+        return PORT_MENU_RIGHT; /* (World Tour: the timer and the list of tournaments, their art cut at the right edge) */
+    }
+    if (sMenuScreen == 17 && top && (starts(name, "mc_menu_plate") || strcmp(name, "mc_scroll_bar_point") == 0 || starts(name, "mc_yajirusi_") ||
+                                     starts(name, "mc_name_text_") || starts(name, "mc_form_text_") || starts(name, "mc_voice_text_") ||
+                                     strcmp(name, "mc_dammy_text") == 0 || strcmp(name, "mc_icon_voice_play") == 0)) {
+        return PORT_MENU_RIGHT; /* (Character Reference: its list and a character's page, cut at the right edge) */
+    }
+    if (sMenuScreen == 17 && top && strcmp(name, "mc_single_chara_l") == 0) {
+        return PORT_MENU_LEFT; /* (and the character's picture there, on the left) */
     }
     if ((sMenuScreen == 43 || sMenuScreen == 39) && top && starts(name, "mc_menu_plate_")) {
         return PORT_MENU_RIGHT; /* (the Data Center, Options: their plates reach the right edge, as their art shows) */

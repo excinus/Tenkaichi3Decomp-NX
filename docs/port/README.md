@@ -4482,7 +4482,13 @@ converted for it has its 2D at its true shape across the whole width, the way th
   it (`mc_menu_plate_*`), Options' "EXIT" (`mc_bottom_plate_*`) against the left; the item shop's counters of
   zenni and of the share collected against the right edge, their digits (`mc_pay_num_*`, `mc_item_num_*`) and
   their icons and frames, which are the page's own pieces (part `PORT_MENU_PAGE_TOP`, anchor 17: any piece in the
-  top 120 lines starting in the right half). A screen's draw can call another's (a backdrop drawn by its own
+  top 120 lines starting in the right half); World Tour's timer and list of tournaments, Character Reference's
+  list and a character's page against the right edge (their art is cut there), its picture against the left
+  (part `PORT_MENU_PAGE_EDGE`, anchor 18: a page's piece cut off at the right edge, from right of x 200, against it).
+  The character selects of Ultimate Battle and the World Tournament (15, 19, 23..25) keep their bars at their
+  true shape like the versus one. Known: what slides in from beyond the 4:3 screen into a part kept in the middle
+  appears at the 4:3 page's edge (the clipping there is needed: without it, pieces the game parks just off the
+  screen show, seen on Training, the shop and Options). A screen's draw can call another's (a backdrop drawn by its own
   function): the pages stack.
 - Known: Character Reference's shelves are pieces of the page like its window, so they stay in the middle and meet
   the backdrop at the 4:3 page's edges.
