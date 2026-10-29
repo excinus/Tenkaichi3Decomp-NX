@@ -208,6 +208,7 @@ static int clip_part(const char *name, int x, int top) {
                                    frames are the page's own pieces, PORT_MENU_PAGE_TOP) */
     }
     if (sMenuScreen == 20 && top && (strcmp(name, "mc_timer") == 0 || starts(name, "mc_taikai") || starts(name, "mc_menu_plate_") ||
+                                     starts(name, "mc_menu_text_") ||
                                      starts(name, "mc_plate_text_") || starts(name, "mc_suji_") || starts(name, "mc_yajirusi_"))) {
         return PORT_MENU_RIGHT; /* (World Tour: the timer and the list of tournaments, their art cut at the right edge) */
     }
@@ -241,7 +242,8 @@ static int clip_part(const char *name, int x, int top) {
         if (n > 2 && name[n - 2] == '_' && name[n - 1] == 'l' && !starts(name, "mc_single_chara_")) {
             return PORT_MENU_LEFT;
         }
-        if (starts(name, "mc_chara_chip_") || strcmp(name, "mc_plate") == 0 || starts(name, "mc_yajirusi_")) {
+        if (starts(name, "mc_chara_chip_") || strcmp(name, "mc_plate") == 0 || starts(name, "mc_yajirusi_") || strcmp(name, "mc_chara_mask") == 0) {
+            /* (with its mask: the cells outside the bar are hidden by it, so it has to be where they are) */
             return PORT_MENU_LEFT_ALL; /* (the player's roster against the left edge, as the versus one's: the user's choice) */
         }
         if (starts(name, "mc_custom_") || starts(name, "mc_item_") || starts(name, "mc_icon_item_")) {
