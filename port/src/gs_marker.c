@@ -119,7 +119,12 @@ static int starts(const char *name, const char *prefix) {
 /* The side of a measured clip that lies from x0 to x1 on the 4:3 screen: one touching its left edge (a guide on the
    left, a column of plates out of it) against the left edge, its right edge the right edge, otherwise by the third
    its middle is in (the rows of a window in the middle stay with it). One as wide as the screen, or with nothing to draw, is left to its pieces. */
+static int clip_place(int x0, int x1);
 int Port_MenuClipPlace(int x0, int x1) {
+    int part = clip_place(x0, x1);
+    return part == PORT_MENU_LEFT ? PORT_MENU_LEFT_ALL : part == PORT_MENU_RIGHT ? PORT_MENU_RIGHT_ALL : part;
+}
+static int clip_place(int x0, int x1) {
     int c = (x0 + x1) / 2;
     if (getenv("BT3_CLIP_LOG") != NULL) {
         fprintf(stderr, "bt3: menu clip measured %d..%d\n", x0, x1);
@@ -136,9 +141,23 @@ int Port_MenuClipPlace(int x0, int x1) {
     return c < 171 ? PORT_MENU_LEFT : c > 341 ? PORT_MENU_RIGHT : PORT_MENU_CENTER;
 }
 
+static int clip_part(const char *name, int x, int top);
+
 /* The part of a clip of the page being drawn (FlashSlot_Draw), PORT_MENU_NONE: as its parent's. `x`: where the clip's
-   origin is on the 4:3 screen (0..512); `top`: a clip of the movie itself, not inside another. */
+   origin is on the 4:3 screen (0..512); `top`: a clip of the movie itself, not inside another. A clip set against
+   an edge keeps all of its pieces at their true shape, one as wide as the 4:3 screen too (the *_ALL parts): a
+   plate's sprite sliding in is that wide for a frame, and would be taken for scenery and stretched. */
 int Port_MenuClipPart(const char *name, int x, int top) {
+    int part = clip_part(name, x, top);
+    if (sMenuScreen < 10) { /* (the main menu keeps its look as approved: its selected plate's streak fills the width) */
+        return part;
+    }
+    return part == PORT_MENU_LEFT ? PORT_MENU_LEFT_ALL : part == PORT_MENU_RIGHT ? PORT_MENU_RIGHT_ALL : part;
+}
+
+int Port_MenuClipPlace(int x0, int x1);
+
+static int clip_part(const char *name, int x, int top) {
     static int log = -1;
     if (log < 0) {
         log = getenv("BT3_CLIP_LOG") != NULL;

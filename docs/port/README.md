@@ -4497,6 +4497,10 @@ converted for it has its 2D at its true shape across the whole width, the way th
   picture) is one page: before, each mark stacked and its end took off one, so after character select every later
   screen kept part of its layout for whatever it drew after its own page (seen as Evolution Z's plates jumping
   towards the middle on the first visit and when an option was chosen).
+- On the screens from 10 on, a clip set against an edge keeps every piece at its true shape, one as wide as the 4:3
+  screen too (`PORT_MENU_LEFT_ALL` / `_RIGHT_ALL`): a plate's sprite sliding in or out is that wide for a frame,
+  and was taken for scenery and stretched: the plates jumped towards the middle for a frame on entering and
+  leaving. The main menu keeps its look (its selected plate's streak fills the width).
 - Known: Character Reference's shelves are pieces of the page like its window, so they stay in the middle and meet
   the backdrop at the 4:3 page's edges.
 - Test aids: `BT3_MENU_MODE=<n>` starts the menus at progress mode n (6 Dragon History, 13 Ultimate Battle, 33 World
