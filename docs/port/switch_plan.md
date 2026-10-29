@@ -396,3 +396,8 @@ differs from the first blank, as between any two builds (it holds addresses of t
 variables); the fight's own values (both fighters' health and positions, the clock, the random generator) are the
 same at every blank. So the Switch computes the game exactly as the PC does: the memory window, the moved program,
 the software float on the console's processor, the data tables fetched from the player's disc.
+
+The launcher showed "The game ended after 89 s, result 0". The fight is 4428 blanks, 73.8 s at 60 a second: the
+whole run, with loading the game's data at start and BT3_HASH's checksum of all of the game's memory (the 28 MB heap
+among it) written to the card at every blank, took 1.2 times the fight's real time. The checksum alone is a large
+part of that, so the game's own work is likely within the 16.7 ms of a blank; a run without BT3_HASH measures it.
