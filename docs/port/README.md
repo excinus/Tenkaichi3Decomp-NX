@@ -4486,9 +4486,12 @@ converted for it has its 2D at its true shape across the whole width, the way th
   list and a character's page against the right edge (their art is cut there), its picture against the left
   (part `PORT_MENU_PAGE_EDGE`, anchor 18: a page's piece cut off at the right edge, from right of x 200, against it).
   The character selects of Ultimate Battle and the World Tournament (15, 19, 23..25) keep their bars at their
-  true shape like the versus one. Known: what slides in from beyond the 4:3 screen into a part kept in the middle
-  appears at the 4:3 page's edge (the clipping there is needed: without it, pieces the game parks just off the
-  screen show, seen on Training, the shop and Options). A screen's draw can call another's (a backdrop drawn by its own
+  true shape like the versus one. Evolution Z's column of plates (42) is against the left edge, as the main
+  menu's: it slides in from the left, so it now comes in from the picture's edge. Known: what slides in from
+  beyond the 4:3 screen into a part kept in the middle appears at the 4:3 page's edge. The clipping there is
+  needed: the game parks pieces just off the screen (sprites 512 wide whose art is off it while their outline
+  overlaps it, so a piece's outline cannot tell a parked one from one sliding in); without it they show (seen on
+  Training, the shop and Options). A sliding part anchored to the edge it comes from has no such seam. A screen's draw can call another's (a backdrop drawn by its own
   function): the pages stack.
 - Known: Character Reference's shelves are pieces of the page like its window, so they stay in the middle and meet
   the backdrop at the 4:3 page's edges.

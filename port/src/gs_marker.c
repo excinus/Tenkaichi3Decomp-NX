@@ -195,6 +195,10 @@ int Port_MenuClipPart(const char *name, int x, int top) {
     if (sMenuScreen == 17 && top && strcmp(name, "mc_single_chara_l") == 0) {
         return PORT_MENU_LEFT; /* (and the character's picture there, on the left) */
     }
+    if (sMenuScreen == 42 && top && starts(name, "mc_menu_plate_")) {
+        return PORT_MENU_LEFT; /* (Evolution Z: its column slides in from the left: against the left edge, so it comes in
+                                  from the picture's edge, as the main menu's) */
+    }
     if ((sMenuScreen == 43 || sMenuScreen == 39) && top && starts(name, "mc_menu_plate_")) {
         return PORT_MENU_RIGHT; /* (the Data Center, Options: their plates reach the right edge, as their art shows) */
     }
