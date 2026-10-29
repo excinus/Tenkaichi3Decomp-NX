@@ -103,6 +103,7 @@ void Port_MenuPage(int screen) {
     /* (the character selects of Ultimate Battle and the World Tournament, 15, 19, 23, 24, 25, as character select) */
     Port_MenuPart(screen == 0 ? PORT_MENU_NONE : screen == 2 ? PORT_MENU_LEFT
                   : screen == 3 || screen == 37 || screen == 44 ? PORT_MENU_CENTER_ALL
+                                                : screen == 14 ? PORT_MENU_LEFT_ALL
                                                 : screen == 13 || screen == 42 || screen == 18 ? PORT_MENU_FILL : screen == 38 ? PORT_MENU_PAGE_TOP
                                                 : screen == 17 || screen == 20 ? PORT_MENU_PAGE_EDGE
                                                 : screen >= 10 ? PORT_MENU_PAGE : PORT_MENU_CENTER);
@@ -247,6 +248,9 @@ static int clip_part(const char *name, int x, int top) {
                                         true shape throughout, or they changed size every frame); its lines fill */
         if (starts(name, "mc_line_") || strcmp(name, "mc_noise") == 0) {
             return PORT_MENU_FILL;
+        }
+        if (starts(name, "mc_chara_")) {
+            return PORT_MENU_RIGHT; /* (the guide, Mr. Satan: he comes to rest against the right edge) */
         }
         if (starts(name, "mc_text_base_") || starts(name, "mc_point_text_") || starts(name, "mc_get_point_") ||
             starts(name, "mc_total_point_") || strcmp(name, "mc_battle_text") == 0 || starts(name, "mc_result_text_") ||

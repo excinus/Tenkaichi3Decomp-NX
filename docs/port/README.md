@@ -4531,6 +4531,8 @@ converted for it has its 2D at its true shape across the whole width, the way th
   `mc_get_point_*`, `mc_total_point_*`, `mc_battle_text`, `mc_result_text_*`, `mc_title_get*`) against the left
   edge at their true shape, its lines (`mc_line_*`, `mc_noise`) filling: sliding in, a panel was as wide as the 4:3
   screen in some frames and narrower in others, so it changed size every frame (seen on the user's recording).
+  The page's own pieces there (the panels' bodies) are on the left with them (part `PORT_MENU_LEFT_ALL`), and the
+  guide (`mc_chara_*`, Mr. Satan) on the right: he crosses the screen whole and comes to rest against its edge.
   The game also tells it (`Port_MenuClipMoving`, gs_marker.c): a clip of a converted screen's movie whose position
   changed within its screen's last 10 draws is moving, and is drawn whole (markers 0x2D / 0x2E). The renderer's own
   test cannot follow a plate drawn as several alike pieces: on the title, New Game's text slid in whole while its
