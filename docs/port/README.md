@@ -4451,7 +4451,8 @@ converted for it has its 2D at its true shape across the whole width, the way th
 - Text the game queues and draws after the screen (`Font_Flush`, src/battle/col_c.c) keeps the part it was queued
   in: each command remembers it (`Font_AllocCmd`), and the flush ends its packet and sends a marker where it
   changes. Outside a converted screen nothing is sent.
-- Converted: the title (one page in the middle; sky and clouds fill), the main menu (the column of plates, the
+- Converted: the title (one page in the middle; sky and clouds fill; its New Game / Continue plates are sprites as
+  wide as the 4:3 screen, kept at their true shape with their shadows: `PORT_MENU_CENTER_ALL`), the main menu (the column of plates, the
   dragon balls and the message against the left edge, the guides against the right, and a piece of the column
   lying in the right half against its edge there: the gold cloud at the top right; sea, road and clouds fill), the
   character, stage and music select with its VS picture: each player's name plates, windows and their text against

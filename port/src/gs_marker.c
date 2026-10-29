@@ -183,6 +183,10 @@ static int clip_part(const char *name, int x, int top) {
     if (starts(name, "mc_bg_") || starts(name, "mc_kumo_")) { /* (not "mc_bgm_now": the music's plate) */
         return PORT_MENU_FILL;
     }
+    if (sMenuScreen == 1 && starts(name, "mc_menu_plate_")) {
+        return PORT_MENU_CENTER_ALL; /* (the title's New Game / Continue: sprites as wide as the 4:3 screen, kept at their
+                                        true shape with their shadows, not stretched as scenery) */
+    }
     if (sMenuScreen == 2) { /* the main menu: the column of plates on the left, the guides on the right */
         if (starts(name, "mc_menu_plate_") || starts(name, "mc_icon") || starts(name, "mc_title") || starts(name, "mc_ch_a_db_") ||
             starts(name, "mc_dragonball") || starts(name, "mc_menu_yajirusi") || starts(name, "mc_chara_db")) {
