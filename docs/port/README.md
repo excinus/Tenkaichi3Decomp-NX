@@ -4465,15 +4465,19 @@ converted for it has its 2D at its true shape across the whole width, the way th
   the disc fusion, World Tournament, the versus menu, Training, Evolution Z with its customising and shop, the
   Data Center with its catalog, password and replays, Character Reference, Options, the results and selection
   screens of those modes; 36 draw functions, converted alike) are all of one kind: a title, plates, a guide or two,
-  a message across the bottom. Each clip of a movie itself (not inside another) is measured first: drawn once with
-  `FlashDraw_Quad` recording where its quads lie instead of drawing them, its callbacks left out (they queue text),
-  no markers sent (`gPortFlashMeasure`, src/sys/gfxm_c.c). `Port_MenuClipPlace`: one touching the 4:3 screen's
-  left edge goes against the left edge, its right edge the right, otherwise by the third its middle is in; one as
-  wide as the screen is left to its pieces. The title row (`mc_title*`, `mc_icon`) is always on the left. What
-  the page draws itself, not in a clip (most screens' windows and plates), stays in the middle; on Dragon History
-  it is the scenery, which fills (with its waterfall, shimmer and fish clips). Character Reference and the catalog
-  keep their window of rows in the middle with its highlight (only the title and the guides go to the sides). A
-  screen's draw can call another's (a backdrop drawn by its own function): the pages stack.
+  a message across the bottom. Each is one page in the middle at its true shape: its parts are often clips of
+  their own that belong together (a frame and the digits in it, a keyboard and its letters, a monitor and the rows
+  on it), which a placing of each clip by itself tore apart (the user's report). Only the title row (`mc_title*`,
+  `mc_icon`) goes to the left, and the guides (`mc_guide_*`, `mc_pikkoro`, `mc_ch_gohan` / `_bidel` / `_goten` /
+  `_uron`) to the side they are on: such a clip is measured first, drawn once with `FlashDraw_Quad` recording
+  where its quads lie instead of drawing them, its callbacks left out (they queue text), no markers sent
+  (`gPortFlashMeasure`, src/sys/gfxm_c.c), and `Port_MenuClipPlace` puts one touching the 4:3 screen's left edge
+  against the left edge, its right edge the right, otherwise by the third its middle is in. The positions cross
+  as whole numbers: the game's code passes floats in other registers than the port's C (they arrived as 0). The
+  gold clouds in the top corners (a sprite from the screen's top edge in that half, against its edge) go to that
+  corner (part `PORT_MENU_PAGE`, anchor 16). Dragon History's page is its scenery, which fills (with its waterfall,
+  shimmer and fish clips). Evolution Z's customising (42) is laid out as character select: its bars at their true
+  shape. A screen's draw can call another's (a backdrop drawn by its own function): the pages stack.
 - Known: Character Reference's shelves are pieces of the page like its window, so they stay in the middle and meet
   the backdrop at the 4:3 page's edges.
 - Test aids: `BT3_MENU_MODE=<n>` starts the menus at progress mode n (6 Dragon History, 13 Ultimate Battle, 33 World

@@ -30,10 +30,12 @@ void Port_GsMarker(int effect) {
      PORT_MENU_FILL    across the whole width, stretched (backdrops, scrolling scenery)
      PORT_MENU_CENTER_ALL, _LEFT_ALL, _RIGHT_ALL  as CENTER, LEFT, RIGHT, and pieces as wide as the 4:3 screen too
                        (in the others they fill the width): a bar whose cells hold other pieces
+     PORT_MENU_PAGE    as CENTER, and a piece from the top edge against a 4:3 edge, in that half, against that edge
+                       (the gold clouds in the corners of the screens from 10 on)
    Which clip of a screen's movie goes where is the table in Port_MenuClipPart, by the clips' names. A screen that
    marks nothing is stretched as before. The renderer acts on the markers only with that layout chosen. */
 enum { PORT_MENU_NONE = -1, PORT_MENU_CENTER, PORT_MENU_FILL, PORT_MENU_LEFT, PORT_MENU_RIGHT, PORT_MENU_CENTER_ALL, PORT_MENU_LEFT_ALL,
-       PORT_MENU_RIGHT_ALL };
+       PORT_MENU_RIGHT_ALL, PORT_MENU_PAGE };
 static int sMenuPart = PORT_MENU_NONE;
 static int sMenuMovie;               /* which of the screen's movies is being drawn (Port_MenuMovie) */
 static int sMenuScreen;              /* PORT_MENU_SCREEN_* of the page being drawn, 0: none */
@@ -82,8 +84,9 @@ void Port_MenuPage(int screen) {
     /* (what a page draws itself, not in a clip, stays in the middle: on most screens its windows and plates. On
        Dragon History, 13, it is the scenery, which fills the width. Character Reference's shelves are such pieces
        too, but so is its window of rows: in the middle, the shelves meet the backdrop at the 4:3 page's edges.) */
-    Port_MenuPart(screen == 0 ? PORT_MENU_NONE : screen == 2 ? PORT_MENU_LEFT : screen == 3 ? PORT_MENU_CENTER_ALL : screen == 13 ? PORT_MENU_FILL
-                                                                                                                   : PORT_MENU_CENTER);
+    /* (Evolution Z's character customising, 42, is laid out as character select: its bars at their true shape too) */
+    Port_MenuPart(screen == 0 ? PORT_MENU_NONE : screen == 2 ? PORT_MENU_LEFT : screen == 3 || screen == 42 ? PORT_MENU_CENTER_ALL
+                                                : screen == 13 ? PORT_MENU_FILL : screen >= 10 ? PORT_MENU_PAGE : PORT_MENU_CENTER);
 }
 
 /* Backdrops: on, and back to the page's part */
@@ -103,23 +106,26 @@ static int starts(const char *name, const char *prefix) {
 /* The side of a measured clip that lies from x0 to x1 on the 4:3 screen: one touching its left edge (a guide on the
    left, a column of plates out of it) against the left edge, its right edge the right edge, otherwise by the third
    its middle is in (the rows of a window in the middle stay with it). One as wide as the screen, or with nothing to draw, is left to its pieces. */
-int Port_MenuClipPlace(float x0, float x1) {
-    float c = (x0 + x1) * 0.5f;
-    if (x1 < x0 || (x0 <= 1.0f && x1 >= 511.0f)) {
+int Port_MenuClipPlace(int x0, int x1) {
+    int c = (x0 + x1) / 2;
+    if (getenv("BT3_CLIP_LOG") != NULL) {
+        fprintf(stderr, "bt3: menu clip measured %d..%d\n", x0, x1);
+    }
+    if (x1 < x0 || (x0 <= 1 && x1 >= 511)) {
         return PORT_MENU_NONE;
     }
-    if (x0 < 16.0f && x1 < 496.0f) {
+    if (x0 < 16 && x1 < 496) {
         return PORT_MENU_LEFT;
     }
-    if (x1 > 496.0f && x0 > 16.0f) {
+    if (x1 > 496 && x0 > 16) {
         return PORT_MENU_RIGHT;
     }
-    return c < 512.0f / 3.0f ? PORT_MENU_LEFT : c > 1024.0f / 3.0f ? PORT_MENU_RIGHT : PORT_MENU_CENTER;
+    return c < 171 ? PORT_MENU_LEFT : c > 341 ? PORT_MENU_RIGHT : PORT_MENU_CENTER;
 }
 
 /* The part of a clip of the page being drawn (FlashSlot_Draw), PORT_MENU_NONE: as its parent's. `x`: where the clip's
    origin is on the 4:3 screen (0..512); `top`: a clip of the movie itself, not inside another. */
-int Port_MenuClipPart(const char *name, float x, int top) {
+int Port_MenuClipPart(const char *name, int x, int top) {
     static int log = -1;
     if (log < 0) {
         log = getenv("BT3_CLIP_LOG") != NULL;
@@ -137,7 +143,7 @@ int Port_MenuClipPart(const char *name, float x, int top) {
         }
         if (i == n && n < 512) {
             snprintf(seen[n++], 64, "%s", key);
-            fprintf(stderr, "bt3: menu clip %s%s x %.0f\n", key, top ? " (top)" : "", x);
+            fprintf(stderr, "bt3: menu clip %s%s x %d\n", key, top ? " (top)" : "", x);
         }
     }
     if (starts(name, "mc_bg_") || starts(name, "mc_kumo_")) { /* (not "mc_bgm_now": the music's plate) */
@@ -169,15 +175,14 @@ int Port_MenuClipPart(const char *name, float x, int top) {
     if (sMenuScreen == 13 && (starts(name, "mc_yuragi_") || starts(name, "mc_taki") || starts(name, "mc_sakana"))) {
         return PORT_MENU_FILL; /* (Dragon History: its scenery, the waterfall, its shimmer, the fish, with the backdrop) */
     }
-    if ((sMenuScreen == 17 || sMenuScreen == 45) && top && !starts(name, "mc_guide_") && strcmp(name, "mc_ch_gohan") != 0) {
-        /* (Character Reference, the fighter catalog: a window of rows in the middle, its highlight and rows with it;
-           only the title row and the guides go to their sides: Chi-Chi, and Gohan reading, mc_ch_gohan) */
-        return PORT_MENU_CENTER;
-    }
-    if (sMenuScreen >= 10 && top) {
-        /* the other screens, all of one kind (a title, plates, a guide or two, a message across the bottom): each
-           of a movie's own clips (what it holds goes with it) against the side of the 4:3 screen where it is. Its
-           place is measured first (-2: FlashSlot_Draw, then Port_MenuClipPlace) */
+    if (sMenuScreen >= 10 && top &&
+        (starts(name, "mc_guide_") || strcmp(name, "mc_pikkoro") == 0 || strcmp(name, "mc_ch_gohan") == 0 || strcmp(name, "mc_ch_bidel") == 0 ||
+         strcmp(name, "mc_ch_goten") == 0 || strcmp(name, "mc_ch_uron") == 0)) {
+        /* the other screens, all of one kind (a title, plates, a guide or two, a message across the bottom): the
+           guides, the characters beside the menu, against the side of the 4:3 screen they are on. Their place is
+           measured first (-2: FlashSlot_Draw, then Port_MenuClipPlace). The rest stays one page in the middle:
+           its parts are often clips of their own that belong together (a frame and the digits in it, a keyboard
+           and its letters, a monitor and the rows on it) and have to keep their places to one another. */
         return -2;
     }
     return PORT_MENU_NONE;

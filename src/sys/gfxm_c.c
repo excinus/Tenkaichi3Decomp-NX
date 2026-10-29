@@ -9,8 +9,9 @@
 #include "sys/dma.h"
 #include "sys/gfx.h"
 #ifdef PORT
-extern int Port_MenuClipPart(const char *name, float x, int top); /* port/src/gs_marker.c: widescreen menus */
-extern int Port_MenuClipPlace(float x0, float x1);
+/* (whole numbers across: the game's code passes floats in other registers than the port's C does) */
+extern int Port_MenuClipPart(const char *name, int x, int top); /* port/src/gs_marker.c: widescreen menus */
+extern int Port_MenuClipPlace(int x0, int x1);
 static int gPortFlashMeasure;  /* FlashDraw_Quad only measures (gPortFlashBox: the leftmost and rightmost x) */
 static float gPortFlashBox[2];
 extern int Port_MenuPart(int part);
@@ -668,7 +669,7 @@ void FlashSlot_Draw(FlashSlot *slot, FlashProp *parent, Flash *flash) {
         {
             /* widescreen menus: the clip (and what it holds, its text too) anchored as its screen has it
                (port/src/gs_marker.c); a clip whose side goes by where it is is measured first */
-            int part = Port_MenuClipPart(clip->name, prop.mtx.m[2] + (f32)flash->ofs[0], parent == NULL);
+            int part = Port_MenuClipPart(clip->name, (int)(prop.mtx.m[2] + (f32)flash->ofs[0]), parent == NULL);
             int prev;
             if (part == -2) {
                 gPortFlashMeasure = 1;
@@ -676,7 +677,7 @@ void FlashSlot_Draw(FlashSlot *slot, FlashProp *parent, Flash *flash) {
                 gPortFlashBox[1] = -1e9f;
                 FlashTl_Draw(&clip->tl, &prop);
                 gPortFlashMeasure = 0;
-                part = Port_MenuClipPlace(gPortFlashBox[0], gPortFlashBox[1]);
+                part = Port_MenuClipPlace((int)gPortFlashBox[0], (int)gPortFlashBox[1]);
             }
             prev = part >= 0 ? Port_MenuPart(part) : 0;
 #endif
