@@ -4522,7 +4522,7 @@ converted for it has its 2D at its true shape across the whole width, the way th
 - Moving pieces are not cut at the 4:3 edges (`menu_piece_moving`, gs_draw.c): a piece is known from frame to
   frame by the part of its texture it shows (its first and last corners' texture coordinates, the same while it
   moves or grows: the title's dragon ball and Nimbus grow and shrink as they fly; several alike in a frame, cells
-  or letters, are taken as still), and one whose edges moved within the last 10 frames is drawn whole, so plates sliding in
+  or letters, are taken as still), and one whose edges moved since the frame before is drawn whole, so plates sliding in
   or out come from and go to the wide picture's edges (the title's New Game / Continue, Options, the versus
   window, Character Reference's list). Still pieces are cut as before: the game parks pieces just off the 4:3
   screen. Checked: every screen's settled frames as before; only transition frames differ.
@@ -4534,9 +4534,10 @@ converted for it has its 2D at its true shape across the whole width, the way th
   The page's own pieces there (the panels' bodies) are on the left with them (part `PORT_MENU_LEFT_ALL`), and the
   guide (`mc_chara_*`, Mr. Satan) on the right: he crosses the screen whole and comes to rest against its edge.
   The game also tells it (`Port_MenuClipMoving`, gs_marker.c): a clip of a converted screen's movie whose position
-  changed within its screen's last 10 draws is moving, and is drawn whole (markers 0x2D / 0x2E). The renderer's own
+  changed since its screen's draw before is moving, and is drawn whole (markers 0x2D / 0x2E). The renderer's own
   test cannot follow a plate drawn as several alike pieces: on the title, New Game's text slid in whole while its
-  plate was still cut.
+  plate was still cut. As soon as a piece stops it is cut again: plates that slide out and stop parked just off the
+  4:3 screen (Options' Save / Load) lingered at the wide picture's edges for 10 frames with a longer window.
 - Evolution Z (42) and Training (18), like Dragon History, have their page's own pieces filling the width: their
   scenery (Kame House, the training ground) is drawn by the page in pieces, which narrowed broke it into blocks.
   The item shop's page (anchor 17) fills likewise, its counters still against the right edge. Their scene

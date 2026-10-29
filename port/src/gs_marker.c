@@ -353,7 +353,7 @@ int Port_MenuClipMoving(const char *name, int x, int top) {
         sMoveClip[i].moved = sMoveDraw;
     }
     sMoveClip[i].lastDraw = sMoveDraw;
-    return sMoveDraw - sMoveClip[i].moved <= 10;
+    return sMoveDraw - sMoveClip[i].moved <= 1; /* (cut as soon as it stops: a plate parked off the screen goes) */
 }
 
 /* The clip being drawn moves (1) or not (0); returns what was before. */

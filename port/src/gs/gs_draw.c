@@ -209,7 +209,7 @@ static int menu_piece_moving(const Vtx *v, const Vtx *last, float x0, float x1, 
     m->x0 = x0;
     m->x1 = x1;
     m->seen = gGsFrame;
-    return m->moved != 0 && gGsFrame - m->moved <= 10;
+    return m->moved != 0 && gGsFrame - m->moved <= 1; /* (as soon as it stops it is cut: parked off the screen) */
 }
 
 void GsGpu_ListStart(void) {
