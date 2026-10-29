@@ -1,0 +1,47 @@
+# Builds the Nintendo Switch spike (port/switch/spike; docs/port/switch_plan.md, phase 1) in devkitPro's container:
+# a homebrew program that checks, on a console, what the Switch port depends on (the memory window, the speed of
+# the game's software float, the OpenGL renderer's shaders on the console's Mesa). It does not contain the game.
+# spike.nro is kept as an artifact of the run, for testers to copy to sdmc:/switch/.
+name: switch
+
+on:
+  push:
+    paths:
+      - "port/switch/**"
+      - "port/src/softfloat_ps2.c"
+      - "port/src/softfloat_ps2_inl.h"
+      - "port/src/gs/shaders/**"
+      - "include/port/vu0_a.h"
+      - ".github/workflows/switch.yml"
+  pull_request:
+    paths:
+      - "port/switch/**"
+      - "port/src/softfloat_ps2.c"
+      - "port/src/softfloat_ps2_inl.h"
+      - "port/src/gs/shaders/**"
+      - "include/port/vu0_a.h"
+      - ".github/workflows/switch.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: switch-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  spike:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container: devkitpro/devkita64:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: sh port/switch/spike/build.sh --here
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bt3-switch-spike
+          path: port/build/switch/spike.nro
+          if-no-files-found: error
+          retention-days: 30

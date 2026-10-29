@@ -91,6 +91,8 @@ See [docs/port/README.md](docs/port/README.md) for the running log of what is do
   game's arithmetic is reproduced exactly as on the PS2); a recent mid-range CPU is recommended.
 - Linux (glibc 2.35 or newer) or Windows 10 / 11.
 - macOS on Apple Silicon: **experimental**, built from source only (see below).
+- Nintendo Switch with Atmosphère: **planned**, nothing runs yet; the design and the test program for consoles are in
+  [docs/port/switch_plan.md](docs/port/switch_plan.md).
 - About 4 GB of disc space, and your disc image as an `.iso` file.
 
 ## Installing a release
