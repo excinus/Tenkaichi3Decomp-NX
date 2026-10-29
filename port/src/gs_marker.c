@@ -207,9 +207,13 @@ static int clip_part(const char *name, int x, int top) {
         return PORT_MENU_RIGHT; /* (the item shop: the digits of its counters of zenni and of the share collected; their
                                    frames are the page's own pieces, PORT_MENU_PAGE_TOP) */
     }
+    if (sMenuScreen == 20 && top && (starts(name, "mc_menu_text_") || strcmp(name, "mc_suji_01") == 0 || starts(name, "mc_dragonball_off_") ||
+                                     starts(name, "mc_plate_text_"))) {
+        return PORT_MENU_CENTER; /* (World Tour: the window of a tournament's prizes, difficulty and number of characters
+                                    in the middle with its frame, which is the page's own piece) */
+    }
     if (sMenuScreen == 20 && top && (strcmp(name, "mc_timer") == 0 || starts(name, "mc_taikai") || starts(name, "mc_menu_plate_") ||
-                                     starts(name, "mc_menu_text_") ||
-                                     starts(name, "mc_plate_text_") || starts(name, "mc_suji_") || starts(name, "mc_yajirusi_"))) {
+                                     starts(name, "mc_yajirusi_"))) {
         return PORT_MENU_RIGHT; /* (World Tour: the timer and the list of tournaments, their art cut at the right edge) */
     }
     if (sMenuScreen == 17 && top && (starts(name, "mc_menu_plate") || strcmp(name, "mc_scroll_bar_point") == 0 || starts(name, "mc_yajirusi_") ||

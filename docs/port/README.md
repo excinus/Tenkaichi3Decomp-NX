@@ -4515,8 +4515,9 @@ converted for it has its 2D at its true shape across the whole width, the way th
   the 4:3 edges: they fade and slide outwards when a stage is chosen. The versus menu's window of modes (Single,
   Team, DP: `mc_mode_*`) is against the left edge with its plates. A roster that hides the cells outside its bar
   with a mask clip (`mc_chara_mask`, the tournament's character select) has the mask with the roster: left in the
-  middle, it hid the leftmost cells. World Tour's number-of-characters window keeps its text (`mc_menu_text_*`)
-  with its frame. World Tour's announcer poster is in the middle
+  middle, it hid the leftmost cells. World Tour's window of a tournament's prizes, difficulty and number of
+  characters is in the middle with its frame (a piece of the page), its text, titles, digits and balls with it
+  (`mc_menu_text_*`, `mc_plate_text_*`, `mc_suji_01`, `mc_dragonball_off_*`); its list and timer stay on the right. World Tour's announcer poster is in the middle
   and not cut at the 4:3 edges (part `PORT_MENU_CENTER_FREE`, anchor 19): it flies across the whole picture.
 - Known: Character Reference's shelves are pieces of the page like its window, so they stay in the middle and meet
   the backdrop at the 4:3 page's edges.
