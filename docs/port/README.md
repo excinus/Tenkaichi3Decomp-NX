@@ -4519,8 +4519,9 @@ converted for it has its 2D at its true shape across the whole width, the way th
   characters is in the middle with its frame (a piece of the page), its text, titles, digits and balls with it
   (`mc_menu_text_*`, `mc_plate_text_*`, `mc_suji_01`, `mc_dragonball_off_*`); its list and timer stay on the right.
 - Moving pieces are not cut at the 4:3 edges (`menu_piece_moving`, gs_draw.c): a piece is known from frame to
-  frame by its first corner's texture coordinates and its size (several alike in a frame, cells or letters, are
-  taken as still), and one whose left edge moved within the last 10 frames is drawn whole, so plates sliding in
+  frame by the part of its texture it shows (its first and last corners' texture coordinates, the same while it
+  moves or grows: the title's dragon ball and Nimbus grow and shrink as they fly; several alike in a frame, cells
+  or letters, are taken as still), and one whose edges moved within the last 10 frames is drawn whole, so plates sliding in
   or out come from and go to the wide picture's edges (the title's New Game / Continue, Options, the versus
   window, Character Reference's list). Still pieces are cut as before: the game parks pieces just off the 4:3
   screen. Checked: every screen's settled frames as before; only transition frames differ.

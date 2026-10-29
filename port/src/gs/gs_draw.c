@@ -154,12 +154,12 @@ int gDrawLogged; /* the picture's line is written (Smooth motion's other picture
    moved within the last 10 frames is moving. A still one is cut there as before: the game parks pieces just off the
    4:3 screen, which narrowed would come into sight. */
 #define MOVE_SLOTS 1024
-typedef struct { uint64_t key; float x0; unsigned seen, moved; int count; } MovePiece;
+typedef struct { uint64_t key; float x0, x1; unsigned seen, moved; int count; } MovePiece;
 static MovePiece sMove[MOVE_SLOTS];
-static int menu_piece_moving(const Vtx *v, float x0, float x1, float h) {
+static int menu_piece_moving(const Vtx *v, const Vtx *last, float x0, float x1, float h) {
     static int off = -1;
     uint64_t key = 1469598103934665603ull;
-    float st[2];
+    float st[4];
     const unsigned char *b = (const unsigned char *)st;
     unsigned i, slot;
     MovePiece *m;
@@ -171,11 +171,12 @@ static int menu_piece_moving(const Vtx *v, float x0, float x1, float h) {
     }
     st[0] = v->s;
     st[1] = v->t;
+    st[2] = last->s;
+    st[3] = last->t;
     for (i = 0; i < sizeof(st); i++) {
         key = (key ^ b[i]) * 1099511628211ull;
     }
-    key = (key ^ (uint64_t)(int)((x1 - x0) * 4.0f)) * 1099511628211ull;
-    key = (key ^ (uint64_t)(int)(h * 4.0f)) * 1099511628211ull;
+
     slot = (unsigned)(key ^ (key >> 32)) & (MOVE_SLOTS - 1);
     for (i = 0; i < 8; i++, slot = (slot + 1) & (MOVE_SLOTS - 1)) {
         m = &sMove[slot];
@@ -187,7 +188,7 @@ static int menu_piece_moving(const Vtx *v, float x0, float x1, float h) {
         return 0;
     }
     if (m->key != key || gGsFrame - m->seen > 30) {
-        m->key = key; m->x0 = x0; m->seen = gGsFrame; m->moved = 0; m->count = 1;
+        m->key = key; m->x0 = x0; m->x1 = x1; m->seen = gGsFrame; m->moved = 0; m->count = 1;
         return 0;
     }
     if (m->seen == gGsFrame) { /* a second one alike in this frame: alike pieces are taken as still */
@@ -197,13 +198,15 @@ static int menu_piece_moving(const Vtx *v, float x0, float x1, float h) {
     if (m->count > 1) {
         m->count = 1;
         m->x0 = x0;
+        m->x1 = x1;
         m->seen = gGsFrame;
         return 0;
     }
-    if (x0 - m->x0 > 0.25f || m->x0 - x0 > 0.25f) {
+    if (x0 - m->x0 > 0.25f || m->x0 - x0 > 0.25f || x1 - m->x1 > 0.25f || m->x1 - x1 > 0.25f) {
         m->moved = gGsFrame;
     }
     m->x0 = x0;
+    m->x1 = x1;
     m->seen = gGsFrame;
     return m->moved != 0 && gGsFrame - m->moved <= 10;
 }
@@ -1780,7 +1783,7 @@ void GsGpu_Draw(int type, int ctx, const GsVertex *v) {
                 d.scissor[2] = (int)(b * (float)SCALE + 0.5f) - d.scissor[0];
             }
             if ((gsAnchor == 9 || (gsAnchor >= 11 && gsAnchor <= 19)) && !noclip && !(gsAnchor == 13 && y1 - y0 >= 300.0f) && gsAnchor != 19 &&
-                !menu_piece_moving(&gsVerts[d.first], x0, x1, y1 - y0)) {
+                !menu_piece_moving(&gsVerts[d.first], &gsVerts[gsVertCount - 1], x0, x1, y1 - y0)) {
                 /* and what lies beyond the page's edge (plates sliding in) stays out of sight, as on the 4:3 screen.
                    Not character select's big pictures (13, taller than 300): they slide outwards when a stage is
                    chosen, and are not parked off the screen. */
