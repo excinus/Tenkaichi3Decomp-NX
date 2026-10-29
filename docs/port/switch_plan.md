@@ -3,11 +3,11 @@
 The Switch port is PLANNED: nothing of the game runs on a Switch yet. This file is the design, the plan and the
 record of what was checked; update it as phases land, as docs/port/macos_plan.md is for the Mac.
 
-Status 2026-10-29: phase 1. The design below; `port/switch/spike`, a homebrew program that checks on a console
-what the port depends on (memory, speed, OpenGL), built by `.github/workflows/switch.yml`. Its first run on a console
-passed everything (see "Results"): the 4 GB window maps at the fixed place, code runs at W + 0x20000000, every
-OpenGL program of the renderer compiles, and the game's software float is about 2.2 times slower than on the build
-machine's Xeon (with the console's CPU at 1785 MHz). Still to run: a second start, and one at the stock 1020 MHz.
+Status 2026-10-29: phase 1 done, phase 2 next. `port/switch/spike`, a homebrew program that checks on a console
+what the port depends on (memory, speed, OpenGL), built by `.github/workflows/switch.yml`, passed everything in
+three runs on a console (see "Results"): the 4 GB window maps at the fixed place every time, code runs at
+W + 0x20000000, every OpenGL program of the renderer compiles, and the game's software float is 3.4 to 4.2 times
+slower than on the build machine's Xeon at the stock 1020 MHz (about 2.2 times at 1785 MHz).
 
 ## Ground rule
 
@@ -149,7 +149,7 @@ an `.nro` from the homebrew menu through a game (hold R): the same folder, no HO
 | Phase | Done when |
 |---|---|
 | 0. Design, spike | This file; `port/switch/spike` builds in CI (`switch` workflow, artifact `bt3-switch-spike`). **Done.** |
-| 1. Spike on a console | Its report (`sdmc:/switch/bt3_spike.txt`) is in this file: the window maps, code runs at W + 0x20000000, the speed is known, every GL program compiles. **First run passed** (2026-10-29); a second start and a run at 1020 MHz to come. |
+| 1. Spike on a console | Its report (`sdmc:/switch/bt3_spike.txt`) is in this file: the window maps, code runs at W + 0x20000000, the speed is known, every GL program compiles. **Done** (2026-10-29): three runs, two at the stock clock, all passed. |
 | 2. The game builds for the Switch | `BT3_CC=nx64` compiles and links the whole game with libnx (`BT3_SKELETON=1`), in CI. |
 | 3. The demo fight on a console | The launcher loads the game; the attract-demo fight runs without a picture and its `BT3_HASH` lines (written to the card) equal Linux's (`compare_hash.py`). |
 | 4. Playable | The platform layer: picture (GL), sound, controllers; the game plays from boot to a fight and saves. |
@@ -160,8 +160,8 @@ Biggest risk: **speed**. The game's arithmetic is exact software float (the READ
 processor); the Switch has four Cortex-A57 cores at 1020 MHz (1785 MHz is common with overclocking). The spike times
 the same routines on the console; on this project's build machine (Xeon at 2.1 GHz, 2026-10-29) they take 5.7-6.9 ns
 per operation and the memory walk 2.8 ns per step; on the console at 1785 MHz 13.5 ns and 3.9 ns (see "Results"),
-so about 2.2 times the PC's time for the game's arithmetic; at the stock 1020 MHz about 3.5 to 4 times, to be
-measured. Whether that is full speed is known only when the game's own demo fight runs (phase 3): its time per
+so about 2.2 times the PC's time for the game's arithmetic; at the stock 1020 MHz 23.7 ns and 6.9 ns, 3.4 to 4.2
+times. Whether that is full speed is known only when the game's own demo fight runs (phase 3): its time per
 field on Linux, multiplied by that, against the 16.7 ms of a field. If the console is too slow for full speed even with the renderer
 on another core, the options are the hot paths in faster exact code (the vector library in integer NEON),
 or a mode that skips drawing frames.
@@ -255,3 +255,37 @@ What it settles:
   start.
 - The process had 3285 MB, nearly all of it taken by libnx's heap at start (as homebrew does), so the regions come
   from that heap, as the launcher's would.
+
+### 2026-10-29, second and third runs (the same console, stock clock)
+
+Two more starts with the CPU at the stock 1020 MHz, both passed; the report file keeps the last one. What differs
+from the first run:
+
+```
+  heap region   0x4b93a00000 + 0x200000000
+  alias region  0xebec00000 + 0x1000000000
+  stack region  0x612e800000 + 0x80000000
+  window W = 0x4000000000 (the fixed choice is free)
+  (every region and the code at W+20000000: ok, as in the first run)
+  CPU clock: 1020 MHz
+  soft float: 23.71 ns per operation (check 3E600658)
+  memory walk: 6.86 ns per step (check 7F8C0DCC)
+  context 4.3 core, clip control yes
+  ok   gs         101 ms        ok   gs nz       70 ms        ok   outline     37 ms
+  ok   vu0        109 ms        ok   vu0 nz     106 ms        ok   alphakey     9 ms
+  ok   vu4         84 ms        ok   vu4 nz      79 ms        ok   dclut       12 ms
+  ok   vu6         86 ms        ok   vu6 nz      82 ms
+  ok   gs wb      115 ms
+  OpenGL: PASS
+```
+
+- **The fixed W was free in all three starts.** The regions moved (this time the alias region at 59-123 GB, the
+  heap at 302 GB, the stack at 388 GB), never over 256-260 GB. The address space is 512 GB and the three regions
+  take 74 GB of it, so a collision is possible but should be uncommon; the launcher keeps the fallback to another
+  4 GB-aligned window, and the program is built so that it can be loaded at any.
+- **Stock speed**: 23.7 ns per soft-float operation, 3.4 to 4.2 times the Xeon's 5.7-6.9 ns, and 1.75 times the
+  1785 MHz figure (the clock ratio is 1.75: the code is bound by the processor, not by memory). The memory walk 6.9 ns
+  against 2.8 ns. The same checks as the PC's again.
+- **Shader compiling at stock**: about 0.9 s for all twelve programs, once at start.
+- What this means for the game is measured in phase 3 (its demo fight's time per field on the console). If stock is
+  too slow, the hot paths can be made faster with the same results, and an overclock helps in proportion.
