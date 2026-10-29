@@ -217,6 +217,9 @@ static int clip_part(const char *name, int x, int top) {
     if (sMenuScreen == 17 && top && strcmp(name, "mc_single_chara_l") == 0) {
         return PORT_MENU_LEFT; /* (and the character's picture there, on the left) */
     }
+    if (sMenuScreen == 16 && top && starts(name, "mc_mode_")) {
+        return PORT_MENU_LEFT; /* (and the window of its modes, Single, Team, DP, under the chosen plate) */
+    }
     if (sMenuScreen == 16 && top && starts(name, "mc_menu_plate_")) {
         return PORT_MENU_LEFT; /* (the versus menu: its plates run off the left edge, the chosen one with them) */
     }

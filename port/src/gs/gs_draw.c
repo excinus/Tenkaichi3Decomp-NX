@@ -1707,8 +1707,20 @@ void GsGpu_Draw(int type, int ctx, const GsVertex *v) {
             if (noclip < 0) {
                 noclip = getenv("BT3_MENU_NOCLIP") != NULL;
             }
-            if ((gsAnchor == 9 || (gsAnchor >= 11 && gsAnchor <= 18)) && !noclip) {
-                /* and what lies beyond the page's edge (plates sliding in) stays out of sight, as on the 4:3 screen */
+            if ((gsAnchor == 9 || (gsAnchor >= 11 && gsAnchor <= 18)) && (d.scissor[0] > 0 || d.scissor[0] + d.scissor[2] < 512 * SCALE)) {
+                /* The game's own clipping window (a roster's bar, which cells scroll through) is in the 4:3 screen's
+                   positions: it is narrowed about the same point as the piece, or the cells moved out of it and were
+                   cut while scrolling (the more, the wider the picture) */
+                float a = (float)d.scissor[0] / (float)SCALE, b = (float)(d.scissor[0] + d.scissor[2]) / (float)SCALE;
+                a = pivot + (a - pivot) * narrow;
+                b = pivot + (b - pivot) * narrow;
+                d.scissor[0] = (int)(a * (float)SCALE);
+                d.scissor[2] = (int)(b * (float)SCALE + 0.5f) - d.scissor[0];
+            }
+            if ((gsAnchor == 9 || (gsAnchor >= 11 && gsAnchor <= 18)) && !noclip && !(gsAnchor == 13 && y1 - y0 >= 300.0f)) {
+                /* and what lies beyond the page's edge (plates sliding in) stays out of sight, as on the 4:3 screen.
+                   Not character select's big pictures (13, taller than 300): they slide outwards when a stage is
+                   chosen, and are not parked off the screen. */
                 int lo = (int)((pivot - pivot * narrow) * (float)SCALE), hi = (int)((pivot + (512.0f - pivot) * narrow) * (float)SCALE + 0.5f);
                 int r = d.scissor[0] + d.scissor[2];
                 d.scissor[0] = d.scissor[0] > lo ? d.scissor[0] : lo;
