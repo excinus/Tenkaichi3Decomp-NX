@@ -62,8 +62,10 @@ else
 cat > $T/bt3_env.txt <<'ENV'
 # Settings for tests (port/src/plat_mem.c, nx_start): NAME=value lines, as the environment variables of the PC
 # builds. None are needed to play. (Phase 3's demo fight was: BT3_DEMO=1 and BT3_GS=none.)
-# Without sound: remove the # in front of the next line (to find out whether the sound is what hangs the game).
+# Without sound: remove the # in front of the next line.
 #BT3_NOSOUND=1
+# Textures decoded on the game's own thread only, without helper threads: remove the # in front of the next line.
+#BT3_TEX_THREADS=0
 ENV
 cat > $K/README.txt <<'TXT'
 Tenkaichi3Decomp for the Nintendo Switch - test kit: the game (phase 4 of docs/port/switch_plan.md)
@@ -92,7 +94,9 @@ its setup made from your disc). If you ran an earlier kit, the gamedata folder i
 6. If the screen stays black and the console becomes slow (as with the first kits): wait a minute, close the game
    with HOME, and send bt3_watch.txt and bt3_log.txt even if they look empty or short. bt3_watch.txt is written
    every 2 seconds by a part of the program that watches the rest: what it was doing, and how often it used the
-   SD card. To start without sound: in bt3_env.txt, remove the # in front of BT3_NOSOUND=1.
+   SD card. Then, in bt3_env.txt, remove the # in front of BT3_TEX_THREADS=0, start the game again, and say
+   whether it gets further that way (send bt3_watch.txt and bt3_log.txt of that start too). (To start without
+   sound: remove the # in front of BT3_NOSOUND=1.)
 
 Saves are in saves/ in that folder, as on the PC (copy them between PC and Switch). Online play is not ready yet.
 TXT

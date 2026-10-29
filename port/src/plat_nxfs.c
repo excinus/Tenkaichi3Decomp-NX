@@ -265,6 +265,62 @@ void __wrap_fsDirClose(FsDir *d) {
     __atomic_sub_fetch(&sOpenDirs, 1, __ATOMIC_RELAXED);
 }
 
+/* BT3_NX_TRACE builds (port/tools/undefined.py): the renderer's C files call these at each function's entry and
+   exit. The game's thread's calls are kept, innermost last, for the watch thread: where that thread stands when the
+   game stops drawing. Addresses as offsets from the program's start (__start__), to be looked up in the build's
+   bt3_nx.map at 0x4020000000 + offset. */
+#define DEPTH 48
+static uintptr_t sMainTls;
+static void *volatile sCall[DEPTH];
+static volatile int sDepth;
+static void *volatile sLastLeft;
+extern char __start__[];
+
+void NxTrace_SetMain(void) {
+    sMainTls = (uintptr_t)armGetTls();
+}
+
+void __cyg_profile_func_enter(void *fn, void *site) __attribute__((no_instrument_function));
+void __cyg_profile_func_enter(void *fn, void *site) {
+    (void)site;
+    if ((uintptr_t)armGetTls() == sMainTls) {
+        int d = sDepth;
+        if (d >= 0 && d < DEPTH) {
+            sCall[d] = fn;
+        }
+        sDepth = d + 1;
+    }
+}
+
+void __cyg_profile_func_exit(void *fn, void *site) __attribute__((no_instrument_function));
+void __cyg_profile_func_exit(void *fn, void *site) {
+    (void)site;
+    if ((uintptr_t)armGetTls() == sMainTls) {
+        sLastLeft = fn;
+        sDepth--;
+    }
+}
+
+/* The game's thread's calls in the renderer, outermost first, as a line into out. The length written. */
+size_t NxTrace_Report(char *out, size_t cap) {
+    int d = sDepth, i;
+    size_t at = 0;
+
+    if (sMainTls == 0) {
+        return 0;
+    }
+    at += put(out, cap, at, "         renderer calls (offsets from __start__; depth %d):", d);
+    for (i = 0; i < d && i < DEPTH; i++) {
+        at += put(out, cap, at, " %#lx", (unsigned long)((uintptr_t)sCall[i] - (uintptr_t)__start__));
+    }
+    if (d == 0) {
+        at += put(out, cap, at, " none (in the game's code or the port's other files); the last one left: %#lx",
+                  (unsigned long)((uintptr_t)sLastLeft - (uintptr_t)__start__));
+    }
+    at += put(out, cap, at, "\n");
+    return at;
+}
+
 /* Every file the C library opens: a buffer of BUFFER bytes (its own would be 1 KB: one request to the card per
    kilobyte read). Before any reading or writing, as setvbuf has to be. */
 FILE *__real_fopen(const char *path, const char *mode);

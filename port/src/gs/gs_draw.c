@@ -518,6 +518,22 @@ static pthread_cond_t sDecWake = PTHREAD_COND_INITIALIZER, sDecDone = PTHREAD_CO
 static const TexDecode *sDecJob;
 static unsigned sDecGen, sDecNext, sDecBusy;
 static int sDecWorkers = -1;
+/* what each worker is doing, for the Switch's watch thread (GsDraw_DecodeReport): 0 not started yet, 1 waiting for
+   a texture, 2 decoding, 3 done with it */
+static volatile int sDecPhase[8], sDecStarted;
+
+/* One line: the workers and the texture being decoded. The length written. */
+size_t GsDraw_DecodeReport(char *out, size_t cap) {
+    int n = snprintf(out, cap, "texture decoding: %d workers (%d started; phases", sDecWorkers, sDecStarted), i;
+    for (i = 0; i < sDecWorkers && i < 8 && n >= 0 && (size_t)n < cap; i++) {
+        n += snprintf(out + n, cap - (size_t)n, " %d", sDecPhase[i]);
+    }
+    if (n >= 0 && (size_t)n < cap) {
+        n += snprintf(out + n, cap - (size_t)n, "), job %u, %u workers busy, next row %u of %u\n", sDecGen, sDecBusy, sDecNext,
+                      sDecJob != NULL ? sDecJob->th : 0);
+    }
+    return n < 0 ? 0 : (size_t)n < cap ? (size_t)n : cap - 1;
+}
 
 static void tex_decode_share(const TexDecode *d) { /* takes chunks of rows until there are none left */
     for (;;) {
@@ -529,11 +545,13 @@ static void tex_decode_share(const TexDecode *d) { /* takes chunks of rows until
     }
 }
 
-static void *tex_decode_worker(void *unused) {
+static void *tex_decode_worker(void *arg) {
     unsigned seen = 0;
-    (void)unused;
+    int me = (int)(intptr_t)arg & 7;
+    __atomic_add_fetch(&sDecStarted, 1, __ATOMIC_RELAXED);
     for (;;) {
         const TexDecode *d;
+        sDecPhase[me] = 1;
         pthread_mutex_lock(&sDecLock);
         while (sDecGen == seen) {
             pthread_cond_wait(&sDecWake, &sDecLock);
@@ -541,7 +559,9 @@ static void *tex_decode_worker(void *unused) {
         seen = sDecGen;
         d = sDecJob;
         pthread_mutex_unlock(&sDecLock);
+        sDecPhase[me] = 2;
         tex_decode_share(d);
+        sDecPhase[me] = 3;
         pthread_mutex_lock(&sDecLock);
         if (--sDecBusy == 0) {
             pthread_cond_signal(&sDecDone);
@@ -558,17 +578,20 @@ static void tex_decode(const TexDecode *d) {
         const char *e = getenv("BT3_TEX_THREADS");
         int n = e != NULL ? atoi(e) : SDL_GetNumLogicalCPUCores() - 2, i;
         sDecWorkers = n < 0 ? 0 : n > 7 ? 7 : n;
+        gPortWhere = "decoding a texture (starting its workers)";
         for (i = 0; i < sDecWorkers; i++) {
             pthread_t t;
-            if (pthread_create(&t, NULL, tex_decode_worker, NULL) != 0) {
+            if (pthread_create(&t, NULL, tex_decode_worker, (void *)(intptr_t)i) != 0) {
                 sDecWorkers = i;
                 break;
             }
             pthread_detach(t);
         }
+        gPortWhere = "decoding a texture";
     }
     if (sDecWorkers == 0 || d->tw * d->th < 16384) { /* (a small one: waking the workers would cost more) */
         tex_decode_rows(d, 0, d->th);
+        gPortWhere = "drawing, after decoding a texture";
         return;
     }
     pthread_mutex_lock(&sDecLock);
@@ -579,11 +602,13 @@ static void tex_decode(const TexDecode *d) {
     pthread_cond_broadcast(&sDecWake);
     pthread_mutex_unlock(&sDecLock);
     tex_decode_share(d);
+    gPortWhere = "decoding a texture (waiting for its workers)";
     pthread_mutex_lock(&sDecLock);
     while (sDecBusy != 0) {
         pthread_cond_wait(&sDecDone, &sDecLock);
     }
     pthread_mutex_unlock(&sDecLock);
+    gPortWhere = "drawing, after decoding a texture";
 }
 
 /* GS memory -> an RGBA texture for the current TEX0 (alpha as stored: 0x80 is opaque). The back end makes

@@ -499,3 +499,15 @@ file); the log is opened once and made descriptors 1 and 2 (`dup2`); and `gPortW
 the game's thread is among the port's main parts (the blank, the controllers, game files, the memory card, the
 sound's stream locks, a texture's decoding, the picture), reported by the watch thread, should the main thread
 still stand still with the file service quiet.
+
+The kit of commit e5996aa: the console stayed responsive (the file service quiet: a few calls a second), the log
+came back (the display, the GL renderer "NV120 (4.3 (Core Profile) Mesa 20.1.0-rc3)", the menu fonts, sound
+playing through audout, the European menu art paired in 20 s on its thread), and the game still stood still at
+frame 69 from 4 s on, the watch thread's last mark of the game's thread being "decoding a texture" (gs_draw.c,
+`tex_decode`): a large texture is decoded by worker threads while the game's thread waits for them all. That mark
+was set on the way in only, so the thread may also have been somewhere after it. The next kit says which: the
+mark is set again when the decoding ends and while the game's thread waits for the workers, the watch thread
+reports each worker's state (`GsDraw_DecodeReport`: started or not, waiting, decoding, done) and, in builds with
+`BT3_NX_TRACE=1` (the `switch` workflow's, for now), the game's thread's calls in the renderer, which is compiled
+with `-finstrument-functions` for it (`NxTrace_Report`, plat_nxfs.c: offsets from the program's start, looked up
+in `bt3_nx.map`). And `bt3_env.txt` offers `BT3_TEX_THREADS=0`: no workers at all.

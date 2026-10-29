@@ -28,6 +28,10 @@ def nx_host(cmd):
     with devkitA64 and libnx as homebrew is built; SDL3's headers (toolchain.sdl3)."""
     sdl = [f"-I{sdl3() / 'include'}"] if sdl3() else []
     inc = ["-D__SWITCH__", f"-I{DEVKITPRO}/libnx/include", f"-I{DEVKITPRO}/portlibs/switch/include"] + sdl
+    # BT3_NX_TRACE=1 (testing on a console): the renderer's C files call a hook at each function's entry and exit,
+    # which keeps the game's thread's calls for the watch thread's report (port/src/plat_nxfs.c)
+    if os.environ.get("BT3_NX_TRACE") and any(a.endswith(".c") and "/port/src/gs/" in a for a in cmd):
+        inc += ["-finstrument-functions"]
     return [dkp("g++" if cmd[0] == "g++" else "gcc")] + NX_ARCH + [a for a in cmd[1:] if a not in MAC_DROP] + inc
 
 def variant(cmd):

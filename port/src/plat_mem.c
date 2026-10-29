@@ -426,6 +426,9 @@ int __wrap_main(int argc, char **argv) {
 extern size_t NxFs_Report(char *out, size_t cap, unsigned ms);
 extern size_t NxFs_Stuck(char *out, size_t cap, unsigned ms);
 extern size_t NxFs_MainLast(char *out, size_t cap);
+extern size_t NxTrace_Report(char *out, size_t cap);
+extern void NxTrace_SetMain(void);
+extern size_t GsDraw_DecodeReport(char *out, size_t cap); /* gs/gs_draw.c */
 extern unsigned long long NxFs_Total(void);
 extern void NxFs_SetThreads(Handle mainThread, Handle watchThread);
 extern Result __real_fsFsDeleteFile(FsFileSystem *fs, const char *p);
@@ -475,7 +478,7 @@ static void watch_write(const char *text, size_t n) {
 /* (times in milliseconds: this file is built with software float, which has no 64-bit integer to double) */
 static void watch_line(const char *what, unsigned t, unsigned late, int report) {
     extern unsigned gGsFrame, gPortVBlanks;
-    static char text[2048];
+    static char text[4096];
     size_t at;
 
     extern const char *volatile gPortWhere; /* plat_stub.c: where the game's thread is, roughly */
@@ -486,6 +489,11 @@ static void watch_line(const char *what, unsigned t, unsigned late, int report) 
         at += NxFs_Report(text + at, sizeof(text) - at, 2000);
         at += NxFs_Stuck(text + at, sizeof(text) - at, 1000);
         at += NxFs_MainLast(text + at, sizeof(text) - at);
+        if (at + 9 < sizeof(text)) {
+            memcpy(text + at, "         ", 9);
+            at += 9 + GsDraw_DecodeReport(text + at + 9, sizeof(text) - at - 9);
+        }
+        at += NxTrace_Report(text + at, sizeof(text) - at);
     }
     watch_write(text, at < sizeof(text) ? at : sizeof(text) - 1);
 }
@@ -545,6 +553,7 @@ static void nx_watch(void *arg) {
    C library's threads.) */
 static void watch_start(void) {
     sLogFd[0] = 2; /* (stdout's and stderr's descriptors are the one file: nx_start) */
+    NxTrace_SetMain(); /* (this is the game's thread: the constructors run on it, and main() after them) */
     if (R_SUCCEEDED(threadCreate(&sWatch, nx_watch, NULL, NULL, 0x10000, 0x2D, 1)) ||
         R_SUCCEEDED(threadCreate(&sWatch, nx_watch, NULL, NULL, 0x10000, 0x2D, -2)) ||
         R_SUCCEEDED(threadCreate(&sWatch, nx_watch, NULL, NULL, 0x10000, 0x3B, -2))) {
