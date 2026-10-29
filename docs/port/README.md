@@ -4486,7 +4486,8 @@ converted for it has its 2D at its true shape across the whole width, the way th
   list and a character's page against the right edge (their art is cut there), its picture against the left
   (part `PORT_MENU_PAGE_EDGE`, anchor 18: a page's piece cut off at the right edge, from right of x 200, against it).
   The character selects of Ultimate Battle and the World Tournament (15, 19, 23..25) keep their bars at their
-  true shape like the versus one. Evolution Z's column of plates (42) is against the left edge, as the main
+  true shape like the versus one. Evolution Z's column of plates (42) and the item shop's two (38, `menu_plate_*`) are
+  against the left edge, as the main
   menu's: it slides in from the left, so it now comes in from the picture's edge. Known: what slides in from
   beyond the 4:3 screen into a part kept in the middle appears at the 4:3 page's edge. The clipping there is
   needed: the game parks pieces just off the screen (sprites 512 wide whose art is off it while their outline
