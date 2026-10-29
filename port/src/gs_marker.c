@@ -76,6 +76,9 @@ int Port_MenuPartNow(void) {
 static int sPageStack[8], sPageDepth;
 void Port_MenuPage(int screen) {
     if (screen != 0) {
+        if (screen == sMenuScreen) {
+            return; /* (marked again in the same draw, as character select does per stage picture: one page) */
+        }
         if (sPageDepth < 8) {
             sPageStack[sPageDepth++] = sMenuScreen;
         }

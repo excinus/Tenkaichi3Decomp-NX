@@ -4493,7 +4493,10 @@ converted for it has its 2D at its true shape across the whole width, the way th
   needed: the game parks pieces just off the screen (sprites 512 wide whose art is off it while their outline
   overlaps it, so a piece's outline cannot tell a parked one from one sliding in); without it they show (seen on
   Training, the shop and Options). A sliding part anchored to the edge it comes from has no such seam. A screen's draw can call another's (a backdrop drawn by its own
-  function): the pages stack.
+  function): the pages stack. A screen marked again in the same draw (character select marks its page per stage
+  picture) is one page: before, each mark stacked and its end took off one, so after character select every later
+  screen kept part of its layout for whatever it drew after its own page (seen as Evolution Z's plates jumping
+  towards the middle on the first visit and when an option was chosen).
 - Known: Character Reference's shelves are pieces of the page like its window, so they stay in the middle and meet
   the backdrop at the 4:3 page's edges.
 - Test aids: `BT3_MENU_MODE=<n>` starts the menus at progress mode n (6 Dragon History, 13 Ultimate Battle, 33 World
