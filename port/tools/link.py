@@ -97,6 +97,8 @@ def main():
         if d.returncode:
             print((d.stdout + d.stderr).strip()[-300:])
             sys.exit(1)
+    if r.returncode == 0 and toolchain.MAC and os.environ.get("BT3_LINK_SEGMENTS"):  # (testing: the segments as linked)
+        print("segments as linked:", [(s, hex(a), hex(n)) for s, a, n in mac_segments(EXE)])
     if r.returncode == 0 and (DATA / "SKELETON").exists():
         # built from the blank data tables: the program needs the list of where their values are on the user's disc
         d = subprocess.run([sys.executable, str(ROOT / "port/tools/make_dat.py")], capture_output=True, text=True)

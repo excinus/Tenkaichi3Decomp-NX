@@ -38,6 +38,7 @@ jobs:
         env:
           BT3_CC: mac64
           BT3_SKELETON: "1"
+          BT3_LINK_SEGMENTS: "1"
         run: |
           mkdir -p port/build
           .venv/bin/python port/tools/undefined.py > port/build/compile_mac64.txt 2>&1 || { tail -40 port/build/compile_mac64.txt; exit 1; }
@@ -46,6 +47,7 @@ jobs:
           test -x port/build/bt3_mac
           file port/build/bt3_mac
           # macOS on Apple Silicon kills a program without a page zero before it starts: 4 GB, as linked
+          otool -l port/build/bt3_mac | grep -B1 -A4 'segname __PAGEZERO'
           otool -l port/build/bt3_mac | grep -A3 'segname __PAGEZERO' | grep -q 'vmsize 0x0000000100000000'
 
       - name: Setup window
