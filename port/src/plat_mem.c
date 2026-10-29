@@ -402,12 +402,13 @@ static void game_main(void) {
 }
 
 int __wrap_main(int argc, char **argv) {
-    extern void Port_WatchStop(void);
+    extern void Port_WatchStop(void), Port_ProfileStart(void);
 
     sArgc = argc;
     sArgv = argv;
     sGameStackTop = (uint8_t *)Port_Ptr(STACK_BASE + STACK_SIZE);
     gPortStage = "the game is running (on its stack in the window)";
+    Port_ProfileStart();
     Port_CallOnStack(game_main, sGameStackTop);
     Port_WatchStop();
     return sResult;
@@ -437,9 +438,103 @@ extern Result __real_fsFsCreateFile(FsFileSystem *fs, const char *p, s64 size, u
 extern Result __real_fsFsOpenFile(FsFileSystem *fs, const char *p, u32 mode, FsFile *out);
 extern Result __real_fsFileWrite(FsFile *f, s64 off, const void *buf, u64 size, u32 option);
 extern void __real_fsFileClose(FsFile *f);
-static Thread sWatch;
-static int sWatching, sLogFd[2] = {-1, -1};
 static volatile int sWatchStop; /* the game has returned to the launcher */
+static Thread sWatch, sProf;
+static int sWatching, sProfiling, sLogFd[2] = {-1, -1};
+static Handle sMainHandle;
+
+/* The sampling profile (a thread of its own, nx_prof): about 250 times a second the game's thread is paused, where it
+   is read (svcGetThreadContext3) and it goes on. Counted by address (an offset from the program's start, __start__:
+   + 0x4020000000 in the build's bt3_nx.map): every sample over the last 30 s, and the samples taken while the game
+   had not reached a vertical blank for 100 ms (a stall: the main menu's at each move, 1 to 3 s of "game code",
+   2026-10-29), the address and the return address (lr: its caller) apart. In bt3_watch.txt. */
+#define PROF_SLOTS 4096
+enum { PROF_ALL, PROF_STALL, PROF_STALL_LR, PROF_TABLES };
+static struct { uint32_t off, n; } sProfTab[PROF_TABLES][PROF_SLOTS];
+static unsigned sProfCount[PROF_TABLES];
+static Mutex sProfLock;
+
+static void prof_add(int k, uint64_t addr) {
+    extern char __start__[];
+    uint64_t base = (uint64_t)(uintptr_t)__start__;
+    uint32_t off = addr >= base && addr - base < 0xFFFFFFFFull ? (uint32_t)(addr - base) : 0xFFFFFFFFu, h = off * 2654435761u, i;
+    for (i = 0; i < PROF_SLOTS; i++) {
+        uint32_t s = (h + i) & (PROF_SLOTS - 1);
+        if (sProfTab[k][s].n == 0 || sProfTab[k][s].off == off) {
+            sProfTab[k][s].off = off;
+            sProfTab[k][s].n++;
+            break;
+        }
+    }
+    sProfCount[k]++;
+}
+
+static void nx_prof(void *arg) {
+    extern unsigned gPortVBlanks;
+    unsigned blank = gPortVBlanks;
+    u64 per = armGetSystemTickFreq() / 1000, changed = armGetSystemTick();
+
+    (void)arg;
+    while (!sWatchStop) {
+        ThreadContext ctx;
+        u64 now;
+        int stalled;
+        svcSleepThread(4000000ull);
+        now = armGetSystemTick();
+        if (gPortVBlanks != blank) {
+            blank = gPortVBlanks;
+            changed = now;
+        }
+        stalled = (now - changed) / per > 100;
+        if (R_FAILED(svcSetThreadActivity(sMainHandle, ThreadActivity_Paused))) {
+            continue;
+        }
+        if (R_SUCCEEDED(svcGetThreadContext3(&ctx, sMainHandle))) {
+            svcSetThreadActivity(sMainHandle, ThreadActivity_Runnable);
+            mutexLock(&sProfLock);
+            prof_add(PROF_ALL, ctx.pc.x);
+            if (stalled) {
+                prof_add(PROF_STALL, ctx.pc.x);
+                prof_add(PROF_STALL_LR, ctx.lr);
+            }
+            mutexUnlock(&sProfLock);
+        } else {
+            svcSetThreadActivity(sMainHandle, ThreadActivity_Runnable);
+        }
+    }
+}
+
+/* Table k's most frequent addresses as text into out, and the table emptied. The length written. */
+static size_t prof_report(int k, const char *what, char *out, size_t cap) {
+    size_t at = 0;
+    int r;
+
+    mutexLock(&sProfLock);
+    if (sProfCount[k] != 0) {
+        at += (size_t)snprintf(out + at, cap - at, "         %s: %u samples:", what, sProfCount[k]);
+        for (r = 0; r < 16 && at < cap; r++) {
+            uint32_t best = 0, i, bi = 0;
+            for (i = 0; i < PROF_SLOTS; i++) {
+                if (sProfTab[k][i].n > best) {
+                    best = sProfTab[k][i].n;
+                    bi = i;
+                }
+            }
+            if (best == 0) {
+                break;
+            }
+            at += (size_t)snprintf(out + at, cap - at, " %#x %u%%", sProfTab[k][bi].off, (unsigned)(best * 100u / sProfCount[k]));
+            sProfTab[k][bi].n = 0; /* (taken: the next best next) */
+        }
+        if (at < cap) {
+            at += (size_t)snprintf(out + at, cap - at, "\n");
+        }
+    }
+    memset(sProfTab[k], 0, sizeof(sProfTab[k]));
+    sProfCount[k] = 0;
+    mutexUnlock(&sProfLock);
+    return at < cap ? at : cap - 1;
+}
 static FsFile sWatchFile;
 static s64 sWatchAt = -1; /* where the next line goes; -1: bt3_watch.txt could not be made */
 
@@ -478,7 +573,7 @@ static void watch_write(const char *text, size_t n) {
 /* (times in milliseconds: this file is built with software float, which has no 64-bit integer to double) */
 static void watch_line(const char *what, unsigned t, unsigned late, int report) {
     extern unsigned gGsFrame, gPortVBlanks;
-    static char text[4096];
+    static char text[8192];
     size_t at;
 
     extern const char *volatile gPortWhere; /* plat_stub.c: where the game's thread is, roughly */
@@ -494,6 +589,11 @@ static void watch_line(const char *what, unsigned t, unsigned late, int report) 
             at += 9 + GsDraw_DecodeReport(text + at + 9, sizeof(text) - at - 9);
         }
         at += NxTrace_Report(text + at, sizeof(text) - at);
+        at += prof_report(PROF_STALL, "the game's thread in stalls (offsets from __start__)", text + at, sizeof(text) - at);
+        at += prof_report(PROF_STALL_LR, "  and its return addresses then", text + at, sizeof(text) - at);
+        if (report == 2) {
+            at += prof_report(PROF_ALL, "the game's thread, the last 30 s (offsets from __start__)", text + at, sizeof(text) - at);
+        }
     }
     watch_write(text, at < sizeof(text) ? at : sizeof(text) - 1);
 }
@@ -534,8 +634,8 @@ static void nx_watch(void *arg) {
         }
         if (++n % 4 == 0) { /* (every 2 seconds) */
             unsigned long long total = NxFs_Total();
-            if (t < 180000 || ticks >= 4 || total - before > 4000) {
-                watch_line(ticks >= 4 ? "nothing drawn" : "running", t, late, 1);
+            if (t < 180000 || ticks >= 4 || total - before > 4000 || n % 60 == 0) {
+                watch_line(ticks >= 4 ? "nothing drawn" : "running", t, late, n % 60 == 0 ? 2 : 1);
             } else {
                 NxFs_Report(NULL, 0, 2000); /* (the counts start again for the next report) */
             }
@@ -560,8 +660,20 @@ static void watch_start(void) {
         NxFs_SetThreads(threadGetCurHandle(), sWatch.handle);
         sWatching = R_SUCCEEDED(threadStart(&sWatch));
     }
+
     if (!sWatching) {
         fprintf(stderr, "bt3: watch: the thread did not start\n");
+    }
+}
+
+/* From main(), once bt3_env.txt has been read (BT3_PROFILE=0: no profile). */
+void Port_ProfileStart(void) {
+    sMainHandle = threadGetCurHandle();
+    if (getenv("BT3_PROFILE") == NULL || atoi(getenv("BT3_PROFILE")) != 0) {
+        if (R_SUCCEEDED(threadCreate(&sProf, nx_prof, NULL, NULL, 0x10000, 0x2D, 1)) ||
+            R_SUCCEEDED(threadCreate(&sProf, nx_prof, NULL, NULL, 0x10000, 0x2D, -2))) {
+            sProfiling = R_SUCCEEDED(threadStart(&sProf));
+        }
     }
 }
 
@@ -571,6 +683,12 @@ void Port_WatchStop(void) {
         threadWaitForExit(&sWatch);
         threadClose(&sWatch);
         sWatching = 0;
+    }
+    if (sProfiling) {
+        sWatchStop = 1;
+        threadWaitForExit(&sProf);
+        threadClose(&sProf);
+        sProfiling = 0;
     }
 }
 

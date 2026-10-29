@@ -1533,6 +1533,12 @@ void Port_GsVif1Chain(uint32_t tadr, int tte) {
                                 "%u new textures (%u pixels), %u new pipelines\n",
                         sFrame, (double)work / 1e6, (double)(tChain - start) / 1e6, (double)netWait / 1e6, (double)(t - tChain) / 1e6, gGpuNewTex,
                         gGpuNewTexPixels, gGpuNewPipes);
+                {
+                    extern unsigned long long gPortFileNs, gPortFileOpenNs, gPortFileBytes;
+                    extern unsigned gPortFileReads, gPortFileOpens;
+                    fprintf(stderr, "slow:   of the game's time: the game's file reads %.1f ms (%u, %llu KB), file opens %.1f ms (%u)\n",
+                            (double)gPortFileNs / 1e6, gPortFileReads, gPortFileBytes >> 10, (double)gPortFileOpenNs / 1e6, gPortFileOpens);
+                }
                 fprintf(stderr, "slow:   of the display list time: texture decoding %.1f ms (of it European menu art %.1f, battle text checks "
                                 "%.1f, menu text %.1f), pipeline creation %.1f ms, submitting the frame %.1f ms\n",
                         (double)gGpuTexNs / 1e6, (double)gGpuArtNs / 1e6, (double)gGpuCheckNs / 1e6, (double)gGpuTextNs / 1e6,
@@ -1546,6 +1552,12 @@ void Port_GsVif1Chain(uint32_t tadr, int tte) {
             sumEnd += gGpuEndNs;
             gGpuNewTex = gGpuNewTexPixels = gGpuNewPipes = 0;
             gGpuTexNs = gGpuPipeNs = gGpuEndNs = gGpuArtNs = gGpuCheckNs = gGpuTextNs = 0;
+            {
+                extern unsigned long long gPortFileNs, gPortFileOpenNs, gPortFileBytes;
+                extern unsigned gPortFileReads, gPortFileOpens;
+                gPortFileNs = gPortFileOpenNs = gPortFileBytes = 0;
+                gPortFileReads = gPortFileOpens = 0;
+            }
         }
         if (getenv("BT3_BURN_MS") != NULL) { /* testing: a slower machine, by burning time in every frame */
             uint64_t until = now_ns() + (uint64_t)atoi(getenv("BT3_BURN_MS")) * 1000000ull;

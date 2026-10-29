@@ -547,3 +547,30 @@ NULL (Port_Ptr). Changed:
   OpenGL only), render thread, mouse pointer, update check (and no check at start: the Switch's updates are phase
   5's), no keyboard column in Controls, and the buttons by the Switch's names;
 - the launcher's icon (the game's cover, 256 x 256, `port/switch/launcher/icon.jpg`).
+
+The kit of commit 9380613 (`BT3_GS_VERBOSE=1`), the same console: no crash entering a fight; the fight's HUD (health
+bars) and its pause menu not shown; the main menus still stuttering, at the press of Start and at each move in the
+mode select, except to and from "Tenkaichi Budokai Online" (the PC's own item, untranslated); with sys-clk at
+1785 MHz CPU / 614 MHz GPU / 1331 MHz memory, a fight from 6 to 12-13 pictures a second. The log:
+- a fight's frame, about 49 ms: the game's code 7 to 8 ms, the display list 41 ms, of which "submitting the frame"
+  (GsGpu_FrameEnd, the OpenGL back end) about 35 ms, for about 2100 draws and 42,000 vertices a frame. The game's
+  code (software float) is not what is slow; the menus' frames take about 5 ms;
+- the main menus' stutters: frames of 1 to 3 s, nearly all of it the game's code (frame 3573: 3.2 s of 3.3), with
+  a file or two of `pzs3us2` read at each (a few small reads), the texture work only milliseconds.
+Changed:
+- the OpenGL back end, per frame: every draw's uniform blocks (its 80-byte Params, a VU1 draw's 320-byte U, equal ones
+  in a row once) are gathered before the draws, uploaded with one glBufferData and bound by range
+  (glBindBufferRange), instead of a glBufferSubData of one small buffer before each draw; the vertex and index
+  buffers are given new storage of the frame's size with their data (glBufferData) rather than written over while
+  the previous frame's draws may still read them. `BT3_GS_VERBOSE` adds where the frame's end spends its time
+  (uploads, issuing the draws, the picture and overlay, the swap) and logs the picture's placement only when it
+  changes. `bt3_env.txt` offers `mesa_glthread=true` (Mesa's GL on a thread of its own) to compare;
+- a sampling profile of the game's thread (plat_mem.c, nx_prof): about 250 times a second it is paused
+  (svcSetThreadActivity), its pc and lr read (svcGetThreadContext3) and it goes on; in bt3_watch.txt the most frequent
+  addresses of the samples taken in stalls (no vertical blank for 100 ms), every 2 s, and of all samples every
+  30 s (offsets from the program's start; `BT3_PROFILE=0`: none). For the menus' stalls and the fights' time alike;
+- the slow-frame line also gives the game's own file reads and opens (time, number, bytes; plat_fcache.c);
+- `BT3_HUD_LOG=1` in the test kit: whether a fight's HUD pieces are drawn at all;
+- on the Switch, the start without the logos, the intro movie and the copyright page by default (the movies flicker),
+  and the settings that do not apply there (full screen, display, renderer, render thread, mouse pointer, update
+  check) neither kept nor written.

@@ -68,6 +68,10 @@ cat > $T/bt3_env.txt <<'ENV'
 #BT3_TEX_THREADS=0
 # Where each frame's time goes, in bt3_log.txt (for the tests of phase 4: remove the line to play without it).
 BT3_GS_VERBOSE=1
+# When the pieces of a fight's HUD are drawn, in bt3_log.txt (for the tests of phase 4).
+BT3_HUD_LOG=1
+# Mesa's OpenGL on a thread of its own (the driver's work on another core): remove the # to try it.
+#mesa_glthread=true
 ENV
 cat > $K/README.txt <<'TXT'
 Tenkaichi3Decomp for the Nintendo Switch - test kit: the game (phase 4 of docs/port/switch_plan.md)

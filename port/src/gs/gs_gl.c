@@ -74,6 +74,7 @@ typedef void GLvoid; typedef ptrdiff_t GLsizeiptr; typedef ptrdiff_t GLintptr; t
     X(glGetUniformBlockIndex, GLuint, (GLuint, const GLchar *), (GLuint, const GLchar *)) \
     X(glUniformBlockBinding, void, (GLuint, GLuint, GLuint), (GLuint, GLuint, GLuint)) \
     X(glBindBufferBase, void, (GLenum, GLuint, GLuint), (GLenum, GLuint, GLuint)) \
+    X(glBindBufferRange, void, (GLenum, GLuint, GLuint, GLintptr, GLsizeiptr), (GLenum, GLuint, GLuint, GLintptr, GLsizeiptr)) \
     X(glGenBuffers, void, (GLsizei, GLuint *), (GLsizei, GLuint *)) \
     X(glBindBuffer, void, (GLenum, GLuint), (GLenum, GLuint)) \
     X(glBufferData, void, (GLenum, GLsizeiptr, const void *, GLenum), (GLenum, GLsizeiptr, const void *, GLenum)) \
@@ -539,15 +540,45 @@ static void apply_masks(uint32_t wmask) {
     }
 }
 
-static void set_params(const void *p, size_t n) {
-    glBindBuffer(GL_UNIFORM_BUFFER, sUboParams);
-    glBufferSubData(GL_UNIFORM_BUFFER, 0, (GLsizeiptr)n, p);
+/* The frame's uniform blocks (frame_end): every draw's blocks are gathered before the draws, uploaded in one go and
+   bound by range, draw by draw. A glBufferSubData of the one small buffer before each draw, as before, had the
+   driver keep or copy the buffer for the draws still to run, some 2000 times a frame in a fight (on the Switch's
+   Mesa, a frame took 35 ms to submit, 2026-10-29). Every block is 80 bytes or more (a native pass's 16 padded), so
+   that a binding of 80 never reaches past the end. */
+#ifndef GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT
+#define GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT 0x8A34
+#endif
+static GLuint sUboFrame;
+static GLint sUboAlign = 256;
+static uint8_t *sStage;
+static size_t sStageCap, sStageUsed;
+static uint32_t *sParOff, *sUOff; /* by draw: where its Params and its U block are in sUboFrame */
+static uint32_t sOffCap;
+static int sRanged[2];            /* bindings 0 (U) and 1 (Params) point into sUboFrame */
+static uint32_t sBoundOff[2];
+
+static uint32_t stage_put(const void *p, size_t n) {
+    size_t at = (sStageUsed + (size_t)sUboAlign - 1) & ~((size_t)sUboAlign - 1);
+    if (at + n > sStageCap) {
+        size_t cap = sStageCap ? sStageCap * 2 : (size_t)1 << 20;
+        while (cap < at + n) { cap *= 2; }
+        sStage = realloc(sStage, cap);
+        sStageCap = cap;
+    }
+    memcpy(sStage + at, p, n);
+    sStageUsed = at + n;
+    return (uint32_t)at;
 }
 
-static void set_uniform_u(const Vu0Uniform *u) {
-    glBindBuffer(GL_UNIFORM_BUFFER, sUboU);
-    glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(Vu0Uniform), u);
+static void bind_frame_range(int binding, uint32_t off, size_t n) {
+    if (!sRanged[binding] || sBoundOff[binding] != off) {
+        glBindBufferRange(GL_UNIFORM_BUFFER, (GLuint)binding, sUboFrame, (GLintptr)off, (GLsizeiptr)n);
+        sRanged[binding] = 1;
+        sBoundOff[binding] = off;
+    }
 }
+
+
 
 static void set_pipe(int pipe) {
     Pipe *p;
@@ -747,6 +778,9 @@ static int gl_init(void) {
     glBindBuffer(GL_UNIFORM_BUFFER, sUboParams);
     glBufferData(GL_UNIFORM_BUFFER, 80, NULL, GL_DYNAMIC_DRAW);
     glBindBufferBase(GL_UNIFORM_BUFFER, 1, sUboParams);
+    glGenBuffers(1, &sUboFrame);
+    glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &sUboAlign);
+    if (sUboAlign < 16 || (sUboAlign & (sUboAlign - 1)) != 0) { sUboAlign = 256; }
 
     for (i = 0; i < 16; i++) {
         int lin = (i & 1) != 0;
@@ -800,7 +834,7 @@ static void frame_end(void) {
     int cur = -1, best = -1, i;
     uint32_t n;
     struct { int32_t mode[4]; float misc[4]; float rect[4]; float orig[4]; float extra[4]; } fu, lastFu;
-    int haveFu = 0;
+    uint64_t tEnd[4];
 
     GsGpu_TitlePoll();
     while (SDL_PollEvent(&ev)) {
@@ -839,19 +873,83 @@ static void frame_end(void) {
         }
     }
 
+    tEnd[0] = SDL_GetTicksNS();
+    /* (new storage of the frame's size each time, data and all, rather than writing over the buffer the previous
+       frame's draws may still be reading: the driver need not wait for them or copy) */
     if (gsVertCount != 0) {
         glBindBuffer(GL_ARRAY_BUFFER, sVboGs);
-        glBufferSubData(GL_ARRAY_BUFFER, 0, (GLsizeiptr)(gsVertCount * sizeof(Vtx)), gsVerts);
+        glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(gsVertCount * sizeof(Vtx)), gsVerts, GL_STREAM_DRAW);
     }
     if (gsVuVertCount != 0) {
         glBindBuffer(GL_ARRAY_BUFFER, sVboVu);
-        glBufferSubData(GL_ARRAY_BUFFER, 0, (GLsizeiptr)(gsVuVertCount * 48), gsVuVerts);
+        glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(gsVuVertCount * 48), gsVuVerts, GL_STREAM_DRAW);
     }
     if (gsVuIdxCount != 0) {
         glBindVertexArray(sVaoVu);
-        glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, (GLsizeiptr)(gsVuIdxCount * sizeof(uint32_t)), gsVuIdx);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr)(gsVuIdxCount * sizeof(uint32_t)), gsVuIdx, GL_STREAM_DRAW);
         glBindVertexArray(0);
     }
+    /* the uniform blocks of every draw (see stage_put): equal ones in a row once */
+    if (sOffCap < gsDrawCount) {
+        sOffCap = gsDrawCount + 1024;
+        sParOff = realloc(sParOff, sOffCap * sizeof(*sParOff));
+        sUOff = realloc(sUOff, sOffCap * sizeof(*sUOff));
+    }
+    sStageUsed = 0;
+    {
+        uint32_t lastPar = 0, lastU = 0;
+        int haveLast = 0, haveLastU = 0, lastUni = -1;
+        for (n = 0; n < gsDrawCount; n++) {
+            const GsDraw *d = &gsDraws[n];
+            if (d->native >= 100 || d->native == 5 || d->native == 4) {
+                continue;
+            }
+            if (d->native == 3) {
+                float params[20] = {(float)d->src, d->misc[0], 0.0f, 0.0f};
+                sParOff[n] = stage_put(params, sizeof(params));
+                haveLast = 0;
+                continue;
+            }
+            if (d->native) {
+                float params[20] = {0.0f};
+                extern int Port_PageAspectMilli(void);
+                params[0] = 1333.333f / (float)Port_PageAspectMilli() / (float)GS_W;
+                params[1] = 1.0f / (float)GS_H;
+                params[2] = 100.0f / 255.0f;
+                params[3] = getenv("BT3_FX_DEBUG") != NULL ? 1.0f : 0.0f;
+                sParOff[n] = stage_put(params, sizeof(params));
+                haveLast = 0;
+                continue;
+            }
+            memset(&fu, 0, sizeof(fu));
+            memcpy(fu.mode, d->mode, sizeof(fu.mode));
+            memcpy(fu.misc, d->misc, sizeof(fu.misc));
+            memcpy(fu.rect, d->rect, sizeof(fu.rect));
+            memcpy(fu.orig, d->orig, sizeof(fu.orig));
+            fu.extra[0] = d->vu ? (gsVuUni[d->uniform].misc[2] > 0.0f ? gsVuUni[d->uniform].misc[2] : 0.0f) : gsZMax;
+            fu.extra[1] = (sPipes[d->pipeline].key & (1u << 9)) ? 1.0f : 0.0f; /* the source scaled by its alpha */
+            if (!haveLast || memcmp(&fu, &lastFu, sizeof(fu)) != 0) {
+                lastPar = stage_put(&fu, sizeof(fu));
+                memcpy(&lastFu, &fu, sizeof(fu));
+                haveLast = 1;
+            }
+            sParOff[n] = lastPar;
+            if (d->vu) {
+                if (!haveLastU || lastUni != (int)d->uniform) {
+                    lastU = stage_put(&gsVuUni[d->uniform], sizeof(Vu0Uniform));
+                    lastUni = (int)d->uniform;
+                    haveLastU = 1;
+                }
+                sUOff[n] = lastU;
+            }
+        }
+    }
+    if (sStageUsed != 0) {
+        glBindBuffer(GL_UNIFORM_BUFFER, sUboFrame);
+        glBufferData(GL_UNIFORM_BUFFER, (GLsizeiptr)sStageUsed, sStage, GL_STREAM_DRAW);
+    }
+    sRanged[0] = sRanged[1] = 0;
+    tEnd[1] = SDL_GetTicksNS();
     for (i = 0; i < 2; i++) {
         uint32_t *px, x, y, fbp = i ? 0x70 : 0;
         if (!(gGsFbUploads & (1u << i))) { continue; }
@@ -935,8 +1033,8 @@ static void frame_end(void) {
             if (cur != d->target) { bind_target(d->target, 0); cur = d->target; }
             set_pipe(d->pipeline);
             set_textures(sTgDep[d->target], 6, sAuxCopy, 6, (GLuint)d->tex, 6);
-            set_params(params, 16);
-            haveFu = 0; /* the Params block now holds this pass's: the next primitive sends its own again */
+            (void)params;
+            bind_frame_range(1, sParOff[n], 80);
             if (d->blendc != lastBlendc) { glBlendColor(d->blendc, d->blendc, d->blendc, d->blendc); lastBlendc = d->blendc; }
             set_scissor(d->scissor);
             glDrawArrays(GL_TRIANGLES, 0, 3);
@@ -953,8 +1051,8 @@ static void frame_end(void) {
             params[1] = 1.0f / (float)GS_H;
             params[2] = 100.0f / 255.0f;
             params[3] = getenv("BT3_FX_DEBUG") != NULL ? 1.0f : 0.0f;
-            set_params(params, 16);
-            haveFu = 0;
+            (void)params;
+            bind_frame_range(1, sParOff[n], 80);
             set_scissor(d->scissor);
             glDrawArrays(GL_TRIANGLES, 0, 3);
             continue;
@@ -967,7 +1065,6 @@ static void frame_end(void) {
             bind_target(d->target, !gsTargets[d->target].cleared);
             gsTargets[d->target].cleared = 1;
             cur = d->target;
-            haveFu = 0;
             sCurPipe = -1;
             haveScissor = 0;
         } else if (!gsTargets[d->target].cleared) {
@@ -984,19 +1081,8 @@ static void frame_end(void) {
         }
         set_pipe(d->pipeline);
         glBindVertexArray(d->vu ? sVaoVu : sVaoGs);
-        if (d->vu) { set_uniform_u(&gsVuUni[d->uniform]); }
-        memset(&fu, 0, sizeof(fu));
-        memcpy(fu.mode, d->mode, sizeof(fu.mode));
-        memcpy(fu.misc, d->misc, sizeof(fu.misc));
-        memcpy(fu.rect, d->rect, sizeof(fu.rect));
-        memcpy(fu.orig, d->orig, sizeof(fu.orig));
-        fu.extra[0] = d->vu ? (gsVuUni[d->uniform].misc[2] > 0.0f ? gsVuUni[d->uniform].misc[2] : 0.0f) : gsZMax;
-        fu.extra[1] = (sPipes[d->pipeline].key & (1u << 9)) ? 1.0f : 0.0f; /* the source scaled by its alpha */
-        if (!haveFu || memcmp(&fu, &lastFu, sizeof(fu)) != 0) {
-            set_params(&fu, sizeof(fu));
-            memcpy(&lastFu, &fu, sizeof(fu));
-            haveFu = 1;
-        }
+        if (d->vu) { bind_frame_range(0, sUOff[n], sizeof(Vu0Uniform)); }
+        bind_frame_range(1, sParOff[n], sizeof(fu));
         set_textures((GLuint)d->tex, d->sampler, sDateCopy, 6, 0, 6);
         if (d->blendc != lastBlendc) { glBlendColor(d->blendc, d->blendc, d->blendc, d->blendc); lastBlendc = d->blendc; }
         set_scissor(d->scissor);
@@ -1007,6 +1093,7 @@ static void frame_end(void) {
         }
     }
 
+    tEnd[2] = SDL_GetTicksNS();
     /* the shown buffer: the one sceGsSwapDBuff set up for this frame, else the first target */
     best = gGsMainFbp >= 0 ? GsDraw_TargetGet((uint32_t)gGsMainFbp, 0) : -1;
     for (i = 0; best < 0 && i < gsTargetCount; i++) { best = i; }
@@ -1029,10 +1116,14 @@ static void frame_end(void) {
             if ((float)sw > (float)sh * want) { w = (int)((float)sh * want + 0.5f); } else { h = (int)((float)sw / want + 0.5f); }
             dx = (sw - w) / 2;
             dy = (sh - h) / 2;
-            if (getenv("BT3_GS_VERBOSE") != NULL) {
+            if (getenv("BT3_GS_VERBOSE") != NULL) { /* (when it changes) */
+                static int last[5] = {-1, -1, -1, -1, -1};
                 int ww, wh;
                 SDL_GetWindowSize(sWindow, &ww, &wh);
-                fprintf(stderr, "gl: present window %dx%d pixels %dx%d aspect %d -> picture %dx%d at (%d,%d)\n", ww, wh, sw, sh, Port_AspectMilli(), w, h, dx, dy);
+                if (last[0] != sw || last[1] != sh || last[2] != w || last[3] != h || last[4] != Port_AspectMilli()) {
+                    last[0] = sw; last[1] = sh; last[2] = w; last[3] = h; last[4] = Port_AspectMilli();
+                    fprintf(stderr, "gl: present window %dx%d pixels %dx%d aspect %d -> picture %dx%d at (%d,%d)\n", ww, wh, sw, sh, Port_AspectMilli(), w, h, dx, dy);
+                }
             }
             {   /* where the picture is in the window, for the overlay's stage and song names (ui.cpp), counted from
                    the top as the overlay does */
@@ -1081,7 +1172,27 @@ static void frame_end(void) {
         free(wp);
     }
     Ui_DrawGL(); /* the overlay, over the presented picture */
+    tEnd[3] = SDL_GetTicksNS();
     SDL_GL_SwapWindow(sWindow);
+    {   /* BT3_GS_VERBOSE: every 60 frames, where the end of the frame spends its time */
+        static uint64_t sum[4];
+        static int count;
+        uint64_t now = SDL_GetTicksNS();
+        sum[0] += tEnd[1] - tEnd[0];
+        sum[1] += tEnd[2] - tEnd[1];
+        sum[2] += tEnd[3] - tEnd[2];
+        sum[3] += now - tEnd[3];
+        if (++count == 60) {
+            if (getenv("BT3_GS_VERBOSE") != NULL) {
+                fprintf(stderr, "time:   of ending the frame (GL): uploads %.2f ms, issuing the draws %.2f, the picture and the "
+                                "overlay %.2f, swapping (the driver, the screen) %.2f; %u KB of uniform blocks\n",
+                        (double)sum[0] / 60e6, (double)sum[1] / 60e6, (double)sum[2] / 60e6, (double)sum[3] / 60e6,
+                        (unsigned)(sStageUsed >> 10));
+            }
+            count = 0;
+            memset(sum, 0, sizeof(sum));
+        }
+    }
     if (getenv("BT3_GS_VERBOSE") != NULL) {
         GLenum e = glGetError();
         if (e != GL_NO_ERROR) { fprintf(stderr, "bt3: gl: frame error 0x%x\n", e); }
