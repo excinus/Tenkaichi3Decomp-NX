@@ -3,8 +3,10 @@
 The Switch port is IN PROGRESS: the game builds for the Switch, but nothing of it runs there yet. This file is the design, the plan and the
 record of what was checked; update it as phases land, as docs/port/macos_plan.md is for the Mac.
 
-Status 2026-10-29: phase 3 done: the game's demo fight ran to its end on a Switch, its fight state identical to
-the PC's on all 4242 blanks of fighting (see "Results"). Phase 4 (picture, sound, controllers) next.
+Status 2026-10-29: phase 4 under way: the Switch's drivers for SDL3 (video with OpenGL through Mesa, sound,
+controllers) are written and the game links with them; its first run on a console is next (`switch-test-kit`).
+Phase 3 done: the game's demo fight ran to its end on a Switch, its fight state identical to the PC's on all 4242
+blanks of fighting (see "Results").
 - Phase 1: `port/switch/spike`, a homebrew program that checks on a console what the port depends on (memory,
   speed, OpenGL), passed everything in three runs on a console (see "Results"): the 4 GB window maps at the fixed
   place every time, code runs at W + 0x20000000, every OpenGL program of the renderer compiles, and the game's
@@ -126,8 +128,9 @@ svcQueryMemory.
 python3 port/switch/sdl3/build.py                            # once: SDL3 for the Switch ("The platform layer")
 BT3_CC=nx64 BT3_SKELETON=1 python3 port/tools/undefined.py   # compile
 BT3_CC=nx64 BT3_SKELETON=1 python3 port/tools/link.py        # -> port/build/bt3_nx, .dat, .mem, .map
+BT3_CC=nx64 python3 port/tools/package.py                    # -> port/build/release-switch, Tenkaichi3Decomp-switch.zip
 port/switch/launcher/build.sh                                # -> port/build/switch/Tenkaichi3Decomp.nro
-port/switch/test_kit.sh                                      # -> port/build/switch/test-kit (phase 3)
+port/switch/test_kit.sh [demo]                               # -> port/build/switch/test-kit
 ```
 
 Needs devkitPro's devkitA64 with libnx and the Switch portlibs (`DEVKITPRO`, default /opt/devkitpro; the
@@ -190,12 +193,22 @@ in its CMakeLists.txt at build time): SDL's POSIX back ends for threads, timers,
 gives newlib those calls), a file-system back end of the port's (`src/filesystem/switch`: the base path is the
 program's folder, from `argv[0]`), and no-op POSIX scheduling calls and `pthread_sigmask` that newlib lacks here
 (`src/core/switch`; threads keep their default priority). SDL's dynamic API is switched off (no shared libraries).
-Video and sound are SDL's dummy drivers so far, and there are no controllers.
-
-Phase 4 adds the Switch's drivers in the same place, after the open devkitPro SDL2 port's (zlib): video (an EGL
-window on `nwindowGetDefault()` and an OpenGL context through Mesa, docked and handheld sizes), audio (audren or
-audout), joystick (hid: Joy-Con pair, Pro Controller, handheld), software keyboard for text. (The first plan, the
-SDL3 calls written over devkitPro's SDL2, is dropped: the two libraries' functions have the same names.)
+The Switch's drivers (phase 4, `port/switch/sdl3/src/{video,audio,joystick}/switch`; `build.py` adds each to SDL's
+list of drivers, before the 3DS's):
+- **video** (`SDL_switchvideo.c`): one window, the screen's size (1920x1080 docked, 1280x720 in the hand; it
+  follows when the console is docked or taken out), on libnx's default window; OpenGL through SDL's own EGL code
+  and devkitPro's Mesa, EGL called directly (`SDL_VIDEO_STATIC_ANGLE`, no shared libraries) with Khronos' types as
+  plain pointers (`EGL_NO_PLATFORM_SPECIFIC_TYPES`). Every `SDL_PumpEvents` runs libnx's applet loop: the system's
+  request to close is SDL's quit, focus changes are window events. The touch screen is the mouse (left button), for
+  the settings window. Text input opens the software keyboard; its text arrives as typed text and a Return.
+- **audio** (`SDL_switchaudio.c`): audout, 48000 Hz, two channels, 16-bit, three buffers in turn; the mixing
+  thread on core 2.
+- **joystick** (`SDL_sysjoystick.c`): four players through libnx's pad API (player 1 also the console in the hand),
+  each an SDL gamepad by position (B south, A east, Y west, X north; + start, - back; ZL, ZR the triggers); rumble.
+The game links Mesa (`-lEGL -lglapi -ldrm_nouveau`) and draws through OpenGL by default on the Switch (gs_draw.c).
+(The first plan, the SDL3 calls written over devkitPro's SDL2, is dropped: the two libraries' functions have the
+same names.) Mesa's SPIR-V path (`glSpecializeShader`) needs functions devkitPro's Mesa leaves out: they are
+link stubs, which the renderer never reaches.
 
 These files are the port's, not SDL's, and are not meant to be offered to SDL: SDL does not accept code written with
 AI tools (its CLAUDE.md), and they were. Kept in this repository and applied at build time only.
@@ -227,7 +240,7 @@ an `.nro` from the homebrew menu through a game (hold R): the same folder, no HO
 | 1. Spike on a console | Its report (`sdmc:/switch/bt3_spike.txt`) is in this file: the window maps, code runs at W + 0x20000000, the speed is known, every GL program compiles. **Done** (2026-10-29): three runs, two at the stock clock, all passed. |
 | 2. The game builds for the Switch | `BT3_CC=nx64` compiles and links the whole game with libnx (`BT3_SKELETON=1`), in CI. **Done** (2026-10-29): `port/build/bt3_nx`; stubs for SDL3 and four system calls. |
 | 3. The demo fight on a console | The launcher loads the game; the attract-demo fight runs without a picture and its `BT3_HASH` lines (written to the card) equal Linux's (`compare_hash.py`). **Done** (2026-10-29): "battle finished", the fight's values the same as the PC's on all 4242 blanks of fighting. |
-| 4. Playable | The platform layer: picture (GL), sound, controllers; the game plays from boot to a fight and saves. |
+| 4. Playable | The platform layer: picture (GL), sound, controllers; the game plays from boot to a fight and saves. Built (2026-10-29): SDL3's Switch drivers, the game's folder as the PC release's (`package.py`); the first run on a console is next. |
 | 5. The package | The setup's Switch mode, the NSP from the player's keys, `Tenkaichi3Decomp-switch.zip` in the release workflow, the updater's Switch asset and its restart through the launcher. |
 | 6. Online | A lobby between a Switch and a PC, by code and by address. |
 
@@ -241,10 +254,19 @@ field on Linux, multiplied by that, against the 16.7 ms of a field. If the conso
 on another core, the options are the hot paths in faster exact code (the vector library in integer NEON),
 or a mode that skips drawing frames.
 
+## The game on a console (phase 4): how to run it
+
+The `switch` workflow's artifact `switch-test-kit` (or `port/switch/test_kit.sh` after a build and `package.py`):
+the game's folder as `package.py` makes it (the PC release's layout: the program and its lists, fonts,
+translations, the online screens' pictures, licences, the notes of textures/, songs/, stages/), a `bt3_env.txt` with
+comments only, and the launcher. Its README.txt has the steps. The launcher ends at once after a game left with
+Exit game; after a crash it shows the report's first lines at its next start; a test run (`bt3_env.txt` with
+`BT3_DEMO` or `BT3_GS=none`) ends on its result screen.
+
 ## The demo fight on a console (phase 3): how to run it
 
-The `switch` workflow's artifact `switch-test-kit` (or `port/switch/test_kit.sh` after a build): the game's program,
-its lists (`.dat`, `.mem`), a `bt3_env.txt` with the PC self-test's settings and `BT3_HASH=bt3_hash.txt`, and the
+`port/switch/test_kit.sh demo` after a build: the game's program,
+its lists (`.dat`, `.mem`, `.rel`), a `bt3_env.txt` with the PC self-test's settings and `BT3_HASH=bt3_hash.txt`, and the
 launcher. Its README.txt has the steps: the kit's folders to the SD card, the PC installation's `gamedata` into the
 title's folder, the launcher from the homebrew menu through a game, and the same fight on the PC for comparison
 (`compare_hash.py bt3_hash_pc.txt bt3_hash.txt --fight`).

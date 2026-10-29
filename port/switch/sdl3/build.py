@@ -49,8 +49,23 @@ DYNAPI = "src/dynapi/SDL_dynapi.h"
 DYNAPI_ANCHOR = "#if defined(SDL_PLATFORM_PRIVATE) // probably not useful on private platforms.\n#define SDL_DYNAMIC_API 0\n"
 DYNAPI_HOOK = "#elif defined(__SWITCH__) // Tenkaichi3Decomp's Switch build (port/switch/sdl3): no shared libraries\n#define SDL_DYNAMIC_API 0\n"
 
+# The Switch's drivers in SDL's lists of drivers (each list and its declarations: the entry before the 3DS's)
+REGISTER = [
+    ("src/video/SDL_video.c", "#ifdef SDL_VIDEO_DRIVER_N3DS\n    &N3DS_bootstrap,\n",
+     "#ifdef SDL_VIDEO_DRIVER_SWITCH\n    &SWITCH_bootstrap,\n#endif\n"),
+    ("src/video/SDL_sysvideo.h", "extern VideoBootStrap N3DS_bootstrap;\n", "extern VideoBootStrap SWITCH_bootstrap;\n"),
+    ("src/audio/SDL_audio.c", "#ifdef SDL_AUDIO_DRIVER_N3DS\n    &N3DSAUDIO_bootstrap,\n",
+     "#ifdef SDL_AUDIO_DRIVER_SWITCH\n    &SWITCHAUDIO_bootstrap,\n#endif\n"),
+    ("src/audio/SDL_sysaudio.h", "extern AudioBootStrap N3DSAUDIO_bootstrap;\n", "extern AudioBootStrap SWITCHAUDIO_bootstrap;\n"),
+    ("src/joystick/SDL_joystick.c", "#ifdef SDL_JOYSTICK_N3DS\n    &SDL_N3DS_JoystickDriver,\n",
+     "#ifdef SDL_JOYSTICK_SWITCH\n    &SDL_SWITCH_JoystickDriver,\n#endif\n"),
+    ("src/joystick/SDL_sysjoystick.h", "extern SDL_JoystickDriver SDL_N3DS_JoystickDriver;\n",
+     "extern SDL_JoystickDriver SDL_SWITCH_JoystickDriver;\n"),
+]
+
 def patch():
-    """Our Switch files into SDL's tree, and SDL's own files edited in two places (the build's only changes to them)."""
+    """Our Switch files into SDL's tree, and SDL's own files edited: the Switch named in CMakeLists.txt and in the lists
+    of drivers, the dynamic API off (the build's only changes to them)."""
     shutil.copy(HERE / "switch.cmake", SRC / "switch.cmake")
     shutil.copytree(HERE / "src", SRC / "src", dirs_exist_ok=True)
     cm = SRC / "CMakeLists.txt"
@@ -65,6 +80,13 @@ def patch():
         if text.count(DYNAPI_ANCHOR) != 1:
             sys.exit(f"SDL {VERSION}: {DYNAPI} has not the lines this build adds the Switch after")
         dh.write_text(text.replace(DYNAPI_ANCHOR, DYNAPI_ANCHOR + DYNAPI_HOOK))
+    for rel, anchor, entry in REGISTER:
+        f = SRC / rel
+        text = f.read_text()
+        if entry not in text:
+            if text.count(anchor) != 1:
+                sys.exit(f"SDL {VERSION}: {rel} has not the one place this build adds the Switch's driver before")
+            f.write_text(text.replace(anchor, entry + anchor))
 
 def build():
     env = dict(os.environ, DEVKITPRO=str(DEVKITPRO),

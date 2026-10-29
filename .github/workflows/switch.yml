@@ -3,12 +3,13 @@
 #   spike   port/switch/spike: a homebrew program that checks, on a console, what the port depends on (the memory
 #           window, the speed of the game's software float, the OpenGL renderer's shaders on the console's Mesa).
 #           spike.nro is kept as an artifact, for testers to copy to sdmc:/switch/.
-#   game    the game itself for the Switch (BT3_CC=nx64): SDL3 built for the Switch (port/switch/sdl3), the game
-#           compiled and linked with it and libnx, the launcher (port/switch/launcher), and the test kit of phase 3
-#           (port/switch/test_kit.sh: the demo fight without a picture, on a console). As the release builds, no
+#   game    the game itself for the Switch (BT3_CC=nx64): SDL3 built for the Switch with its drivers
+#           (port/switch/sdl3), the game compiled and linked with it, Mesa and libnx, its folder as the PC release's
+#           (package.py: Tenkaichi3Decomp-switch.zip), the launcher (port/switch/launcher), and a test kit
+#           (port/switch/test_kit.sh). As the release builds, no
 #           disc and no game data are involved (BT3_SKELETON=1: the data tables are built blank and the program
-#           fetches their values from the player's disc at start). Not playable yet: SDL's video, sound and
-#           controllers are its dummy drivers until phase 4; what the Switch does not have is listed in stubs.txt.
+#           fetches their values from the player's disc at start). What the Switch does not have is listed in
+#           stubs.txt.
 name: switch
 
 on:
@@ -75,6 +76,7 @@ jobs:
           python3 port/tools/link.py 2>&1 | tee port/build/link_nx64.txt
           test -f port/build/bt3_nx
           echo "functions the Switch does not have yet (stubs): $(wc -l < port/build/stubs.txt)"
+          python3 port/tools/package.py
 
       - name: Launcher and test kit
         run: |
@@ -95,6 +97,12 @@ jobs:
           path: port/build/switch/test-kit
           if-no-files-found: error
           retention-days: 30
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Tenkaichi3Decomp-switch
+          path: port/build/Tenkaichi3Decomp-switch.zip
+          if-no-files-found: error
+          retention-days: 14
       - uses: actions/upload-artifact@v4
         with:
           name: bt3_nx

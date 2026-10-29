@@ -468,6 +468,62 @@ static int find_game(int argc, char **argv, char *folder, size_t size) {
     return 0;
 }
 
+/* A test run (bt3_env.txt sets the demo fight without a picture, phase 3's test kit): its end is shown */
+static int test_run(const char *folder) {
+    char path[PATH_SIZE], line[256];
+    FILE *f;
+    int test = 0;
+
+    snprintf(path, sizeof(path), "%s/bt3_env.txt", folder);
+    f = fopen(path, "r");
+    while (f != NULL && fgets(line, sizeof(line), f) != NULL) {
+        test |= strncmp(line, "BT3_GS=none", 11) == 0 || strncmp(line, "BT3_DEMO=", 9) == 0;
+    }
+    if (f != NULL) {
+        fclose(f);
+    }
+    return test;
+}
+
+/* A crash ends the whole process (the game's report, port/src/plat_crash.c, then the system), so it is told at the
+   next start: the report's first lines, then A starts the game anyway (the report kept as bt3_crash_prev.txt). */
+static int crash_notice(const char *folder) {
+    char path[PATH_SIZE], prev[PATH_SIZE], line[160];
+    FILE *f;
+    int n = 0;
+
+    snprintf(path, sizeof(path), "%s/bt3_crash.txt", folder);
+    f = fopen(path, "r");
+    if (f == NULL) {
+        return 1;
+    }
+    printf(CONSOLE_RED "The game crashed the last time." CONSOLE_RESET " Its report (%s):\n\n", path);
+    while (n++ < 12 && fgets(line, sizeof(line), f) != NULL) {
+        printf("  %s", line);
+    }
+    fclose(f);
+    printf("\nPlease send that file. A: start the game anyway, +: exit.\n");
+    consoleUpdate(NULL);
+    while (appletMainLoop()) {
+        u64 down;
+        padUpdate(&sPad);
+        down = padGetButtonsDown(&sPad);
+        if (down & HidNpadButton_Plus) {
+            consoleExit(NULL);
+            return 0;
+        }
+        if (down & HidNpadButton_A) {
+            break;
+        }
+        consoleUpdate(NULL);
+    }
+    snprintf(prev, sizeof(prev), "%s/bt3_crash_prev.txt", folder);
+    remove(prev);
+    rename(path, prev);
+    printf("\n");
+    return 1;
+}
+
 int main(int argc, char **argv) {
     char folder[FS_MAX_PATH], path[PATH_SIZE];
     const char *why;
@@ -481,6 +537,9 @@ int main(int argc, char **argv) {
         return fail("The game's program was not found. It is looked for:\n"
                     "  next to this launcher, as " PROGRAM ",\n  and as " TITLE_FOLDER "/" PROGRAM "\n"
                     "Copy the game's folder to the SD card (docs/port/switch_plan.md).\n");
+    }
+    if (!crash_notice(folder)) {
+        return 0;
     }
     snprintf(path, sizeof(path), "%s/" PROGRAM, folder);
     printf("Game: %s\n", path);
@@ -514,16 +573,12 @@ int main(int argc, char **argv) {
 
     t0 = armGetSystemTick();
     r = run(self, entry);
+    if (r == 0 && !test_run(folder)) {
+        consoleExit(NULL); /* (played and left with Exit game: straight back to the menu) */
+        return 0;
+    }
     printf(CONSOLE_YELLOW "Tenkaichi3Decomp" CONSOLE_RESET " - launcher\n\nThe game ended after %" PRIu64 " s, result %d.\n",
            (uint64_t)(armTicksToNs(armGetSystemTick() - t0) / 1000000000u), r);
-    snprintf(path, sizeof(path), "%s/bt3_crash.txt", folder);
-    {
-        FILE *f = fopen(path, "rb");
-        if (f != NULL) {
-            fclose(f);
-            printf(CONSOLE_RED "There is a crash report: %s" CONSOLE_RESET "\n", path);
-        }
-    }
     show_log_tail(folder, 24);
     /* The program's segments stay mapped: a thread of it may still be there until this process ends, now. */
     wait_plus();

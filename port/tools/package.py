@@ -6,6 +6,8 @@
     python3 port/tools/package.py          -> port/build/release/ and port/build/Tenkaichi3Decomp-linux-x64.zip
     BT3_CC=win64 python3 port/tools/package.py   (after the win64 build and `port/setup/build.sh win`)
                                            -> port/build/release-win/ and port/build/Tenkaichi3Decomp-windows-x64.zip
+    BT3_CC=nx64 python3 port/tools/package.py    (after the Switch build; docs/port/switch_plan.md)
+                                           -> port/build/release-switch/ and port/build/Tenkaichi3Decomp-switch.zip
 
 Contents:  Tenkaichi3Decomp, Tenkaichi3Decomp.dat   the game without the data tables of the original programs (strip_data.py)
            Tenkaichi3Decomp-setup       the setup window: reads the user's own disc image and unpacks it into gamedata/
@@ -320,7 +322,93 @@ def portable(out):
             bad.append(f"{f}: needs glibc {vers[-1][0]}.{vers[-1][1]}")
     print("portable: yes (baseline x86-64, glibc <= 2.35)" if not bad else "NOT PORTABLE:\n  " + "\n  ".join(bad))
 
+NX_OUT = ROOT / "port/build/release-switch"
+NX_ZIP = ROOT / "port/build/Tenkaichi3Decomp-switch.zip"
+
+NX_README = """Dragon Ball Z: Budokai Tenkaichi 3 - port for the Nintendo Switch (Atmosphere homebrew). EXPERIMENTAL.
+
+This folder goes to the SD card as  atmosphere/contents/0100B73DEC000000/  (it is the game's folder, laid out as the
+PC release's). The game's data comes from your own disc: copy the gamedata folder of your PC installation here, or
+let the Switch setup make it from your disc image. Start it with the launcher (Tenkaichi3Decomp.nro from the homebrew
+menu, through a game: hold R while starting one) or, later, the NSP. See docs/port/switch_plan.md.
+
+Controllers: by position, as a PS2 pad (B is Cross, A is Circle, Y is Square, X is Triangle; L/R and ZL/ZR are
+L1/R1 and L2/R2). + and - together open the settings window; the touch screen works as the mouse there.
+Saves are kept in saves/, as on the PC: they can be copied between the two. A file placed in gamedata/mods/<same
+path as the original> replaces the original. Texture packs (PCSX2 naming) go into textures/, stages and music from
+outside the disc into stages/ and songs/: see the note in each folder.
+
+This package contains no game data.
+
+The port's own code is under the GNU AGPL, version 3 (licenses/tenkaichi3decomp-agpl.txt; code from before the
+change of licence also under MIT, licenses/tenkaichi3decomp-mit.txt). The libraries it is built with, and their
+licences: licenses/. Its source, this release's tag included: https://github.com/z3xox/Tenkaichi3Decomp
+"""
+
+NX_LIBRARIES = """The Switch program (Tenkaichi3Decomp) is linked with these libraries besides the port's own (see the
+other files here for those):
+
+- SDL 3.4.12, zlib licence: https://www.libsdl.org/license.php, source https://github.com/libsdl-org/SDL
+  It is built with the Switch platform files of this port (port/switch/sdl3 in the port's source), which are the
+  port's own code under its licence and not part of SDL.
+- libnx (switchbrew), ISC licence: https://github.com/switchbrew/libnx/blob/master/LICENSE.md
+- Mesa (devkitPro's build for the Switch: EGL, OpenGL, the nouveau driver), MIT licence:
+  https://docs.mesa3d.org/license.html, source https://github.com/devkitPro/mesa
+- devkitA64's newlib (C library) and the GCC runtime libraries (GPL with the runtime library exception):
+  https://devkitpro.org
+"""
+
+def main_nx():
+    """BT3_CC=nx64: the game's folder for the Switch (docs/port/switch_plan.md), laid out as the PC release folder: the
+    program (an ELF the launcher loads) with its lists (.dat, .mem, .rel), the screen reader's lines, translations,
+    fonts, the online screens' pictures, the notes of textures/, songs/, stages/, README.txt, licenses/. It goes to
+    atmosphere/contents/0100B73DEC000000/ on the SD card; the zip is what the automatic update will take. The
+    launcher (port/switch/launcher) is not in it."""
+    import toolchain
+    exe = toolchain.EXE
+    for need in (exe, pathlib.Path(str(exe) + ".rel")):
+        if not need.exists():
+            sys.exit(f"missing {need.relative_to(ROOT)}: build first (BT3_CC=nx64 undefined.py and link.py)")
+    if NX_OUT.exists():
+        shutil.rmtree(NX_OUT)
+    take_program(exe, NX_OUT)
+    shutil.copy2(str(exe) + ".rel", NX_OUT / (NAME + ".rel"))
+    # the symbols too (crash reports give addresses: the build's bt3_nx.map has the names)
+    subprocess.run([toolchain.dkp("strip"), "--strip-all", str(NX_OUT / NAME)], check=True)
+    take_lang(NX_OUT)
+    take_translations(NX_OUT)
+    (NX_OUT / "README.txt").write_text(NX_README)
+    lic = NX_OUT / "licenses"
+    lic.mkdir()
+    shutil.copy2(ROOT / "LICENSE", lic / "tenkaichi3decomp-agpl.txt")
+    shutil.copy2(ROOT / "LICENSE-MIT", lic / "tenkaichi3decomp-mit.txt")
+    shutil.copy2(ROOT / "port/third_party/imgui/LICENSE.txt", lic / "dear-imgui.txt")
+    shutil.copy2(ROOT / "port/third_party/newlib_libm/COPYING.NEWLIB", lic / "newlib.txt")
+    shutil.copy2(ROOT / "port/third_party/xxhash/LICENSE", lic / "xxhash.txt")
+    shutil.copy2(ROOT / "port/third_party/miniaudio/LICENSE", lic / "miniaudio.txt")
+    shutil.copy2(ROOT / "port/third_party/miniz/LICENSE", lic / "miniz.txt")
+    shutil.copy2(ROOT / "port/third_party/monocypher/LICENCE.md", lic / "monocypher.txt")
+    (lic / "switch-libraries.txt").write_text(NX_LIBRARIES)
+    take_fonts(NX_OUT, lic)
+    take_tbo_art(NX_OUT, lic)
+    (NX_OUT / "textures").mkdir()
+    (NX_OUT / "textures/README.txt").write_text(TEXTURES_NOTE)
+    for kind, note in (("stages", STAGES_NOTE), ("songs", SONGS_NOTE)):
+        (NX_OUT / kind).mkdir()
+        (NX_OUT / kind / "README.txt").write_text(note)
+    if NX_ZIP.exists():
+        NX_ZIP.unlink()
+    with zipfile.ZipFile(NX_ZIP, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+        for p in sorted(NX_OUT.rglob("*")):
+            if p.is_file():
+                info = zipfile.ZipInfo.from_file(p, "Tenkaichi3Decomp/" + str(p.relative_to(NX_OUT)))
+                info.compress_type = zipfile.ZIP_DEFLATED
+                z.writestr(info, p.read_bytes(), compresslevel=9)
+    print(f"{NX_ZIP.relative_to(ROOT)}: {NX_ZIP.stat().st_size / 1e6:.1f} MB")
+
 if os.environ.get("BT3_CC") == "win64":
     main_win()
+elif os.environ.get("BT3_CC") == "nx64":
+    main_nx()
 else:
     main()

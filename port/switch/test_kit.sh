@@ -1,19 +1,21 @@
 #!/bin/sh
-# The Switch test kit of phase 3 (docs/port/switch_plan.md): the game's program for the Switch (port/build/bt3_nx,
-# BT3_CC=nx64), its lists (.dat, .mem, .rel), the launcher (port/switch/launcher/build.sh) and a bt3_env.txt that runs the game's demo
-# fight without a picture and logs the fight's state, with the instructions  ->  port/build/switch/test-kit/
-# Needs devkitA64's strip (DEVKITPRO, default /opt/devkitpro).
+# A Switch test kit (docs/port/switch_plan.md): the game's folder for the Switch (BT3_CC=nx64 port/tools/package.py:
+# the program, its lists, the release folder's files), the launcher (port/switch/launcher/build.sh), a bt3_env.txt
+# and the instructions
+#   -> port/build/switch/test-kit/
+#   port/switch/test_kit.sh         the game as it is played (phase 4): bt3_env.txt with comments only
+#   port/switch/test_kit.sh demo    phase 3's test: the demo fight without a picture, its state logged to compare
 cd "$(dirname "$0")/../.." || exit 1
-: "${DEVKITPRO:=/opt/devkitpro}"
 K=port/build/switch/test-kit
 T=$K/atmosphere/contents/0100B73DEC000000
-for f in port/build/bt3_nx port/build/bt3_nx.dat port/build/bt3_nx.mem port/build/bt3_nx.rel port/build/switch/Tenkaichi3Decomp.nro; do
-    [ -f "$f" ] || { echo "missing $f (build the game with BT3_CC=nx64 and the launcher first)"; exit 1; }
+R=port/build/release-switch  # the game's folder, as the PC release's (BT3_CC=nx64 port/tools/package.py)
+for f in $R/Tenkaichi3Decomp $R/Tenkaichi3Decomp.rel port/build/switch/Tenkaichi3Decomp.nro; do
+    [ -f "$f" ] || { echo "missing $f (build the game with BT3_CC=nx64, package.py, and the launcher first)"; exit 1; }
 done
 rm -rf $K && mkdir -p $T $K/switch || exit 1
-$DEVKITPRO/devkitA64/bin/aarch64-none-elf-strip -o $T/Tenkaichi3Decomp port/build/bt3_nx || exit 1
-cp port/build/bt3_nx.dat $T/Tenkaichi3Decomp.dat && cp port/build/bt3_nx.mem $T/Tenkaichi3Decomp.mem && cp port/build/bt3_nx.rel $T/Tenkaichi3Decomp.rel || exit 1
+cp -R $R/. $T/ || exit 1
 cp port/build/switch/Tenkaichi3Decomp.nro $K/switch/ || exit 1
+if [ "$1" = demo ]; then
 cat > $T/bt3_env.txt <<'ENV'
 # Settings for this test (port/src/plat_mem.c, nx_start): the game's demo fight without a picture, as the PC
 # setup's self-test runs it, with the fight's state written to bt3_hash.txt at every vertical blank.
@@ -24,11 +26,12 @@ BT3_SAVES=selftest_saves
 BT3_HASH=bt3_hash.txt
 ENV
 cat > $K/README.txt <<'TXT'
-Tenkaichi3Decomp for the Nintendo Switch - test kit (phase 3 of docs/port/switch_plan.md)
+Tenkaichi3Decomp for the Nintendo Switch - test kit: the demo fight without a picture (phase 3 of
+docs/port/switch_plan.md)
 
-This is NOT the playable game yet. It runs the game's demo fight (the computer against itself) on the Switch,
-without picture or sound, and writes the fight's state at every frame. Compared with the same fight on a PC, it
-shows whether the Switch computes the game exactly as the PC does.
+It runs the game's demo fight (the computer against itself) on the Switch, without picture or sound, and writes the
+fight's state at every frame. Compared with the same fight on a PC, it shows whether the Switch computes the game
+exactly as the PC does.
 
 What you need: a Switch with Atmosphere, and your PC installation of Tenkaichi3Decomp (its gamedata folder, which
 its setup made from your disc).
@@ -55,4 +58,33 @@ bt3_log.txt), and writes bt3_hash_pc.txt: send that too. Then
     python3 port/tools/compare_hash.py bt3_hash_pc.txt bt3_hash.txt --fight
 says whether the fight is the same on both.
 TXT
+else
+cat > $T/bt3_env.txt <<'ENV'
+# Settings for tests (port/src/plat_mem.c, nx_start): NAME=value lines, as the environment variables of the PC
+# builds. None are needed to play. (Phase 3's demo fight was: BT3_DEMO=1 and BT3_GS=none.)
+ENV
+cat > $K/README.txt <<'TXT'
+Tenkaichi3Decomp for the Nintendo Switch - test kit: the game (phase 4 of docs/port/switch_plan.md)
+
+The first build of the game on the Switch with picture, sound and controllers. EXPERIMENTAL: it has never run
+before; what does not work yet is what this test is for.
+
+What you need: a Switch with Atmosphere, and your PC installation of Tenkaichi3Decomp (its gamedata folder, which
+its setup made from your disc). If you ran an earlier kit, the gamedata folder is already on the card.
+
+1. Copy this kit's folders to the root of the SD card: atmosphere/ and switch/ (they merge with what is there;
+   replace the files of an earlier kit, bt3_env.txt included).
+2. If it is not there yet: copy the gamedata folder of your PC installation into
+   atmosphere/contents/0100B73DEC000000/  on the card, next to Tenkaichi3Decomp.
+3. On the Switch, start the homebrew menu THROUGH A GAME (hold R while starting any game), then "Tenkaichi3Decomp".
+4. Play. The controllers work as a PS2 pad by position (B is Cross, A is Circle, Y is Square, X is Triangle;
+   L/R and ZL/ZR are L1/R1 and L2/R2). + and - together open the settings window (F1 on the PC); the touch screen
+   works as the mouse there. F1 > Exit game ends it.
+5. Tell what works and what does not (picture, sound, controllers, menus, a fight, its speed), and send from
+   atmosphere/contents/0100B73DEC000000/:  bt3_log.txt, and bt3_crash.txt if there is one. After a crash the
+   launcher shows the report's first lines at its next start.
+
+Saves are in saves/ in that folder, as on the PC (copy them between PC and Switch). Online play is not ready yet.
+TXT
+fi
 echo "test kit in $K"

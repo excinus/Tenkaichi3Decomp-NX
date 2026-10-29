@@ -2195,6 +2195,9 @@ int GsGpu_Init(void) {
     if (api == NULL || strcmp(api, "auto") == 0) {
         /* the settings window's choice (Renderer; Vulkan unless OpenGL was picked there) */
         sb = Port_Setting("gpu_api", 0) == 1 ? &sGlBackend : &sVulkanBackend;
+#ifdef __SWITCH__
+        sb = &sGlBackend; /* the Switch: OpenGL through Mesa only (no SDL_GPU there; docs/port/switch_plan.md) */
+#endif
         api = NULL;
     } else if (strcmp(api, "vk") == 0 || strcmp(api, "vulkan") == 0) {
         sb = &sVulkanBackend;
