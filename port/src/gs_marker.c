@@ -242,6 +242,18 @@ static int clip_part(const char *name, int x, int top) {
     if (sMenuScreen == 16 && top && starts(name, "mc_menu_plate_")) {
         return PORT_MENU_LEFT; /* (the versus menu: its plates run off the left edge, the chosen one with them) */
     }
+    if (sMenuScreen == 14 && top) { /* Dragon History's result: its panels and their text and digits slide in from the
+                                        left (as wide as the 4:3 screen at rest, narrower while sliding: kept at their
+                                        true shape throughout, or they changed size every frame); its lines fill */
+        if (starts(name, "mc_line_") || strcmp(name, "mc_noise") == 0) {
+            return PORT_MENU_FILL;
+        }
+        if (starts(name, "mc_text_base_") || starts(name, "mc_point_text_") || starts(name, "mc_get_point_") ||
+            starts(name, "mc_total_point_") || strcmp(name, "mc_battle_text") == 0 || starts(name, "mc_result_text_") ||
+            starts(name, "mc_title_get") || starts(name, "mc_icon_get") || starts(name, "mc_dammy_text_")) {
+            return PORT_MENU_LEFT;
+        }
+    }
     if (sMenuScreen == 18 && top && starts(name, "mc_menu_plate_")) {
         return PORT_MENU_RIGHT; /* (Training: its plates run off the right edge) */
     }
