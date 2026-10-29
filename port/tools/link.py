@@ -37,10 +37,7 @@ def link_mac(objs, extra):
     sdl = os.environ.get("BT3_SDL3", "/opt/homebrew/opt/sdl3")
     cmd = ["clang", "-arch", "arm64", "-mmacosx-version-min=11.0", "-w", "-o", str(EXE)] + extra + objs + \
           [f"-L{sdl}/lib", "-lSDL3", "-lc++", f"-Wl,-rpath,{sdl}/lib", "-Wl,-rpath,@executable_path/lib",
-           "-Wl,-e,___wrap_main", "-Wl,-export_dynamic", f"-Wl,-map,{EXE}.map",
-           # a page zero of 4 GB, said explicitly: the program is moved to 1 TB with -segaddr below, and a link where
-           # the page zero came out 0 bytes (seen in the release build) is killed by macOS before it starts
-           "-Wl,-pagezero_size,0x100000000"]
+           "-Wl,-e,___wrap_main", "-Wl,-export_dynamic", f"-Wl,-map,{EXE}.map"]
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode:
         return r
@@ -48,7 +45,33 @@ def link_mac(objs, extra):
     segs = [s for s in mac_segments(EXE) if s[0] != "__PAGEZERO"]
     first = min(a for _, a, _ in segs)
     moved = [f"-Wl,-segaddr,{s},{MAC_BASE + a - first:#x}" for s, a, _ in segs if s != "__LINKEDIT"]
-    return subprocess.run(cmd + moved, capture_output=True, text=True)
+    r = subprocess.run(cmd + moved, capture_output=True, text=True)
+    if r.returncode == 0:
+        mac_pagezero(EXE)
+    return r
+
+def mac_pagezero(exe):
+    """A page zero of 4 GB in the program's header. Some linkers (Xcode 16's on GitHub's Mac) leave it 0 bytes when
+    every segment is moved with -segaddr, -pagezero_size or not, and macOS on Apple Silicon kills such a program
+    before it starts, without a word (found by josehs08). Nothing else lies below 4 GB here (the program is at 1 TB),
+    so the header's vmsize is set and the program signed again (ad hoc)."""
+    import struct
+    data = bytearray(exe.read_bytes())
+    magic, _, _, _, ncmds = struct.unpack_from("<IiiII", data, 0)
+    if magic != 0xFEEDFACF:
+        return
+    off = 32
+    for _ in range(ncmds):
+        cmd, size = struct.unpack_from("<II", data, off)
+        if cmd == 0x19 and data[off + 8:off + 24].rstrip(b"\0") == b"__PAGEZERO":  # LC_SEGMENT_64
+            vmaddr, vmsize = struct.unpack_from("<QQ", data, off + 24)
+            if vmaddr == 0 and vmsize < 0x100000000:
+                struct.pack_into("<Q", data, off + 32, 0x100000000)
+                exe.write_bytes(data)
+                subprocess.run(["codesign", "--force", "--sign", "-", str(exe)], check=True, capture_output=True)
+                print(f"__PAGEZERO {vmsize:#x} -> 4 GB")
+            return
+        off += size
 
 def link(objs, extra):
     if MAC:
@@ -97,8 +120,6 @@ def main():
         if d.returncode:
             print((d.stdout + d.stderr).strip()[-300:])
             sys.exit(1)
-    if r.returncode == 0 and toolchain.MAC and os.environ.get("BT3_LINK_SEGMENTS"):  # (testing: the segments as linked)
-        print("segments as linked:", [(s, hex(a), hex(n)) for s, a, n in mac_segments(EXE)])
     if r.returncode == 0 and (DATA / "SKELETON").exists():
         # built from the blank data tables: the program needs the list of where their values are on the user's disc
         d = subprocess.run([sys.executable, str(ROOT / "port/tools/make_dat.py")], capture_output=True, text=True)

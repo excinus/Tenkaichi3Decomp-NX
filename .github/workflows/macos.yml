@@ -38,7 +38,6 @@ jobs:
         env:
           BT3_CC: mac64
           BT3_SKELETON: "1"
-          BT3_LINK_SEGMENTS: "1"
         run: |
           mkdir -p port/build
           .venv/bin/python port/tools/undefined.py > port/build/compile_mac64.txt 2>&1 || { tail -40 port/build/compile_mac64.txt; exit 1; }
