@@ -286,7 +286,7 @@ int __wrap_main(int argc, char **argv) {
      - pages are 4 KB; the memory is cleared, as mmap's is;
      - the game's main() runs on a stack in the window, on the main thread, as on macOS. */
 #include <malloc.h> /* memalign */
-#include <unistd.h> /* chdir */
+#include <unistd.h> /* chdir, fsync */
 #include <switch.h>
 
 /* The window's base for the game's code (port/tools/macwin/macwin.cpp loads it in every function): 0x20000000 below
@@ -392,9 +392,44 @@ static void game_main(void) {
     sResult = __real_main(sArgc, sArgv);
 }
 
+/* A thread of its own beside the game, twice a second:
+   - the log onto the card (fsync): what the game wrote is kept even when it is ended from outside (HOME, or the
+     console turned off) while it hangs; without it the card's file stayed empty (the first console run of phase 4);
+   - when the game has drawn nothing for 3 seconds (a hang, or a long load), a line in the log saying so, with how far
+     the start had got, again every 30 seconds while it lasts, and one when it draws again. */
+static void nx_watch(void *arg) {
+    extern unsigned gGsFrame, gPortVBlanks;
+    unsigned frame = gGsFrame, blank = gPortVBlanks, ticks = 0;
+
+    (void)arg;
+    for (;;) {
+        svcSleepThread(500000000ull);
+        fsync(fileno(stderr));
+        fsync(fileno(stdout));
+        if (gGsFrame != frame || gPortVBlanks != blank) {
+            if (ticks >= 6) {
+                fprintf(stderr, "bt3: watch: drawing again after %u.%u s\n", ticks / 2, ticks % 2 * 5);
+            }
+            frame = gGsFrame;
+            blank = gPortVBlanks;
+            ticks = 0;
+        } else if (++ticks == 6 || (ticks > 6 && ticks % 60 == 6)) {
+            fprintf(stderr, "bt3: watch: nothing drawn for %u s (frame %u, blank %u; %s)\n", ticks / 2, frame, blank, gPortStage);
+        }
+    }
+}
+
 int __wrap_main(int argc, char **argv) {
+    static Thread watch;
+
     sArgc = argc;
     sArgv = argv;
+    /* (core 1: the game is on core 0, its sound on core 2; a priority above the C library's threads) */
+    if (R_SUCCEEDED(threadCreate(&watch, nx_watch, NULL, NULL, 0x10000, 0x2D, 1)) ||
+        R_SUCCEEDED(threadCreate(&watch, nx_watch, NULL, NULL, 0x10000, 0x2D, -2)) ||
+        R_SUCCEEDED(threadCreate(&watch, nx_watch, NULL, NULL, 0x10000, 0x3B, -2))) {
+        threadStart(&watch);
+    }
     sGameStackTop = (uint8_t *)Port_Ptr(STACK_BASE + STACK_SIZE);
     gPortStage = "the game is running (on its stack in the window)";
     Port_CallOnStack(game_main, sGameStackTop);

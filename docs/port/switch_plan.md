@@ -4,7 +4,8 @@ The Switch port is IN PROGRESS: the game builds for the Switch, but nothing of i
 record of what was checked; update it as phases land, as docs/port/macos_plan.md is for the Mac.
 
 Status 2026-10-29: phase 4 under way: the Switch's drivers for SDL3 (video with OpenGL through Mesa, sound,
-controllers) are written and the game links with them; its first run on a console is next (`switch-test-kit`).
+controllers) are written and the game links with them. Its first start on a console stopped after the language list
+(a black screen, the console slowed down, see "Results"); the kit after it says why (`switch-test-kit`).
 Phase 3 done: the game's demo fight ran to its end on a Switch, its fight state identical to the PC's on all 4242
 blanks of fighting (see "Results").
 - Phase 1: `port/switch/spike`, a homebrew program that checks on a console what the port depends on (memory,
@@ -240,7 +241,7 @@ an `.nro` from the homebrew menu through a game (hold R): the same folder, no HO
 | 1. Spike on a console | Its report (`sdmc:/switch/bt3_spike.txt`) is in this file: the window maps, code runs at W + 0x20000000, the speed is known, every GL program compiles. **Done** (2026-10-29): three runs, two at the stock clock, all passed. |
 | 2. The game builds for the Switch | `BT3_CC=nx64` compiles and links the whole game with libnx (`BT3_SKELETON=1`), in CI. **Done** (2026-10-29): `port/build/bt3_nx`; stubs for SDL3 and four system calls. |
 | 3. The demo fight on a console | The launcher loads the game; the attract-demo fight runs without a picture and its `BT3_HASH` lines (written to the card) equal Linux's (`compare_hash.py`). **Done** (2026-10-29): "battle finished", the fight's values the same as the PC's on all 4242 blanks of fighting. |
-| 4. Playable | The platform layer: picture (GL), sound, controllers; the game plays from boot to a fight and saves. Built (2026-10-29): SDL3's Switch drivers, the game's folder as the PC release's (`package.py`); the first run on a console is next. |
+| 4. Playable | The platform layer: picture (GL), sound, controllers; the game plays from boot to a fight and saves. Built (2026-10-29): SDL3's Switch drivers, the game's folder as the PC release's (`package.py`). First start on a console: hangs after the language list (see "Results"). |
 | 5. The package | The setup's Switch mode, the NSP from the player's keys, `Tenkaichi3Decomp-switch.zip` in the release workflow, the updater's Switch asset and its restart through the launcher. |
 | 6. Online | A lobby between a Switch and a PC, by code and by address. |
 
@@ -423,3 +424,25 @@ The launcher showed "The game ended after 89 s, result 0". The fight is 4428 bla
 whole run, with loading the game's data at start and BT3_HASH's checksum of all of the game's memory (the 28 MB heap
 among it) written to the card at every blank, took 1.2 times the fight's real time. The checksum alone is a large
 part of that, so the game's own work is likely within the 16.7 ms of a blank; a run without BT3_HASH measures it.
+
+### 2026-10-29, phase 4: the game's first start on a console (the same console)
+
+The kit of commit 1872257. The port's language list (the first screen, drawn by the game's own frames through the
+GL renderer) came up and worked with the controller. After a language was chosen the screen stayed black, with no
+sound, and the whole console slowed down: the volume buttons and HOME answered only after about 10 seconds; + and −
+did not open the settings window; nothing changed in 5 minutes. Every later start was the same from its first frame
+(the choice was saved, so the list is not shown again and the game goes straight on to the same point).
+`bt3_log.txt` and `bt3_log_prev.txt` were empty: the log's lines were not on the card when the game was closed from
+outside (the phase 3 run, which ended by itself, had its lines).
+
+What the two kinds of start share is the first sound: the confirm sound of the language list, or the first sound
+after it; that is when the game opens the sound output (`gs/snd_adx.c`), through SDL's Switch driver, which no
+earlier console run had used (phase 3 ran without picture or sound). A sound driver whose mixing thread never waits
+(a buffer refused by audout, so the thread is at once ready for the next) keeps the console's sound service busy,
+which would slow the volume buttons and HOME as seen. Not shown yet; the next kit tells:
+- the log is written to the card twice a second (`fsync` in a thread of its own, `plat_mem.c`), so it survives a hang;
+- the same thread writes a line when the game has drawn nothing for 3 seconds (with how far the start had got);
+- the sound driver writes what audout refuses (the first five times, with the error code) and when it starts
+  playing, and waits a period after a refused buffer or a failed wait instead of trying again at once;
+- `bt3_env.txt` has `#BT3_NOSOUND=1`: with the `#` removed the game starts without sound, which shows whether the
+  sound is what hangs it.

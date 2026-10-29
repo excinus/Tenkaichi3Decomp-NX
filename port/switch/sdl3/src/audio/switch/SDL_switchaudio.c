@@ -4,7 +4,10 @@
    this file was: it is not meant to be offered to SDL. Modelled on SDL's console drivers (audio/n3ds).
 
    Playback through libnx's audout service: 48000 Hz, two channels, signed 16-bit (all it takes; SDL converts the
-   rest), NUM_BUFFERS buffers of one device period appended in turn. The mixing thread runs on its own core. */
+   rest), NUM_BUFFERS buffers of one device period appended in turn. The mixing thread runs on its own core.
+   What audout refuses is written to the log (stderr: the game's bt3_log.txt), the first few times, and the thread
+   waits a period then instead of trying again at once: a mixing thread that never waits keeps a core and the
+   console's sound service busy (the first console run of the game hung the whole console after its first sound). */
 #include "SDL_internal.h"
 
 #ifdef SDL_AUDIO_DRIVER_SWITCH
@@ -12,6 +15,7 @@
 #include "../SDL_sysaudio.h"
 
 #include <malloc.h>
+#include <stdio.h>
 #include <switch.h>
 
 #define NUM_BUFFERS 3
@@ -21,12 +25,34 @@ struct SDL_PrivateAudioData
     AudioOutBuffer buffer[NUM_BUFFERS];
     Uint8 *mixbuf;
     int next, queued;
+    int refused;      /* the last buffer was refused: wait a period before the next */
+    int complaints;   /* lines written to the log so far */
+    int played;       /* a buffer has come back played (said once in the log) */
 };
+
+#define COMPLAINTS 5
+
+/* One line in the log, the first COMPLAINTS times */
+static void complain(struct SDL_PrivateAudioData *h, const char *what, Result rc)
+{
+    if (h->complaints < COMPLAINTS) {
+        h->complaints++;
+        fprintf(stderr, "bt3: sound (audout): %s: error 0x%X (module %u, description %u)%s\n", what, (unsigned)rc,
+                (unsigned)R_MODULE(rc), (unsigned)R_DESCRIPTION(rc), h->complaints == COMPLAINTS ? "; not said again" : "");
+    }
+}
+
+/* A device period, in nanoseconds */
+static u64 period_ns(SDL_AudioDevice *device)
+{
+    return (u64)device->sample_frames * 1000000000ull / (u64)(device->spec.freq > 0 ? device->spec.freq : 48000);
+}
 
 static bool SWITCHAUDIO_OpenDevice(SDL_AudioDevice *device)
 {
     struct SDL_PrivateAudioData *h;
     size_t size;
+    Result rc;
     int i;
 
     h = (struct SDL_PrivateAudioData *)SDL_calloc(1, sizeof(*h));
@@ -34,10 +60,14 @@ static bool SWITCHAUDIO_OpenDevice(SDL_AudioDevice *device)
         return false;
     }
     device->hidden = h;
-    if (R_FAILED(audoutInitialize())) {
+    rc = audoutInitialize();
+    if (R_FAILED(rc)) {
+        complain(h, "opening the sound output", rc);
         return SDL_SetError("audout: could not open the sound output");
     }
-    if (R_FAILED(audoutStartAudioOut())) {
+    rc = audoutStartAudioOut();
+    if (R_FAILED(rc)) {
+        complain(h, "starting the sound output", rc);
         audoutExit();
         return SDL_SetError("audout: could not start the sound output");
     }
@@ -68,11 +98,30 @@ static bool SWITCHAUDIO_WaitDevice(SDL_AudioDevice *device)
 {
     struct SDL_PrivateAudioData *h = device->hidden;
 
+    if (h->refused) {
+        h->refused = 0;
+        svcSleepThread(period_ns(device));
+        return true;
+    }
     while (h->queued >= NUM_BUFFERS && !SDL_GetAtomicInt(&device->shutdown)) {
         AudioOutBuffer *released = NULL;
         u32 count = 0;
-        if (R_FAILED(audoutWaitPlayFinish(&released, &count, 100000000ull))) { /* (0.1 s, to see a shutdown) */
+        Result rc = audoutWaitPlayFinish(&released, &count, 100000000ull); /* (0.1 s, to see a shutdown) */
+        if (R_FAILED(rc)) {
+            if (R_VALUE(rc) != KERNELRESULT(TimedOut)) {
+                complain(h, "waiting for a buffer", rc);
+                svcSleepThread(period_ns(device)); /* (never at once again: the error may be at once too) */
+            }
             continue;
+        }
+        if (count == 0) { /* (woken with nothing given back: not at once again either) */
+            svcSleepThread(1000000ull);
+            continue;
+        }
+        if (!h->played) {
+            h->played = 1;
+            fprintf(stderr, "bt3: sound (audout): playing, %d Hz, %d channels, %d frames a buffer\n", device->spec.freq,
+                    device->spec.channels, device->sample_frames);
         }
         h->queued -= (int)count;
         if (h->queued < 0) {
@@ -86,12 +135,17 @@ static bool SWITCHAUDIO_PlayDevice(SDL_AudioDevice *device, const Uint8 *buffer,
 {
     struct SDL_PrivateAudioData *h = device->hidden;
     AudioOutBuffer *b = &h->buffer[h->next];
+    Result rc;
 
     SDL_memcpy(b->buffer, buffer, (size_t)buflen);
     b->data_size = (u64)buflen;
-    if (R_SUCCEEDED(audoutAppendAudioOutBuffer(b))) {
+    rc = audoutAppendAudioOutBuffer(b);
+    if (R_SUCCEEDED(rc)) {
         h->next = (h->next + 1) % NUM_BUFFERS;
         h->queued++;
+    } else {
+        complain(h, "handing over a buffer", rc);
+        h->refused = 1; /* (not here: this runs holding the device's lock) */
     }
     return true;
 }
