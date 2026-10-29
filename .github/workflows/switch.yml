@@ -68,7 +68,6 @@ jobs:
         env:
           BT3_CC: nx64
           BT3_SKELETON: "1"
-          BT3_NX_TRACE: "1"  # (testing on consoles, phase 4: the renderer's calls in bt3_watch.txt; port/src/plat_nxfs.c)
         run: |
           mkdir -p port/build
           python3 port/tools/undefined.py > port/build/compile_nx64.txt 2>&1 || { tail -40 port/build/compile_nx64.txt; exit 1; }

@@ -4,8 +4,10 @@ The Switch port is IN PROGRESS: the game builds for the Switch, but nothing of i
 record of what was checked; update it as phases land, as docs/port/macos_plan.md is for the Mac.
 
 Status 2026-10-29: phase 4 under way: the Switch's drivers for SDL3 (video with OpenGL through Mesa, sound,
-controllers) are written and the game links with them. Its first start on a console stopped after the language list
-(a black screen, the console slowed down, see "Results"); the kit after it says why (`switch-test-kit`).
+controllers) are written and the game links with them. On a console it now runs to the main menu, with picture,
+sound and controllers (after a black screen found to be SDL asking libnx's sockets service for the number of
+processors, see "Results"); open: a stutter at each move in the main menu, a crash entering a fight, the intro
+movies flickering black.
 Phase 3 done: the game's demo fight ran to its end on a Switch, its fight state identical to the PC's on all 4242
 blanks of fighting (see "Results").
 - Phase 1: `port/switch/spike`, a homebrew program that checks on a console what the port depends on (memory,
@@ -511,3 +513,19 @@ reports each worker's state (`GsDraw_DecodeReport`: started or not, waiting, dec
 `BT3_NX_TRACE=1` (the `switch` workflow's, for now), the game's thread's calls in the renderer, which is compiled
 with `-finstrument-functions` for it (`NxTrace_Report`, plat_nxfs.c: offsets from the program's start, looked up
 in `bt3_nx.map`). And `bt3_env.txt` offers `BT3_TEX_THREADS=0`: no workers at all.
+
+The kit of commit 6352c02, two runs. With the texture workers (as built): `texture decoding: -1 workers (0 started)`
+and the game's thread in `tex_decode` (under `texture_get`, `GsGpu_Draw`, ... `Port_GsVif1Chain`), before the
+number of workers was even set: in `SDL_GetNumLogicalCPUCores`, whose Switch build used `sysctlbyname("hw.ncpu")`
+(SDL's configure found the symbol; newlib here has no `sysconf`). libnx's `sysctl` is the BSD sockets service's
+(`socket.o`), and the program never starts that service (`socketInitialize`): the call never returned. With
+`BT3_TEX_THREADS=0`: the game ran, to the main menu and on (the player's photo and video: the Italian menus, the
+music), and crashed entering a fight (nothing of it in the log: so not the port's handler, plat_crash.c, nor a stub;
+the report asked for: bt3_crash.txt if any, Atmosphere's crash_reports/). Changed: SDL built with
+`HAVE_SYSCTLBYNAME=OFF` (its other uses of sysctl, the RAM and page size, behind the same switch), two texture
+workers on the Switch (its three cores: the game's thread on one, the sound on another), and the trace
+(`BT3_NX_TRACE`) off in the workflow's build again: it instruments the renderer's per-pixel functions too, which made
+the decoding of the menu's textures on the game's thread (no workers) slower still. The main menu stuttered at each
+move (the player's video: the cursor moves, the line of description at the bottom changes a moment later): the trace
+caught the game's thread in `tex_decode_rows` / `Gs_VramRead` there; with the workers back and no trace, to be seen.
+(For online play, phase 6: the sockets service has to be started first.)

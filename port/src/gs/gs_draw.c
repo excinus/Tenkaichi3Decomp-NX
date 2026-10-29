@@ -576,7 +576,11 @@ static void tex_decode(const TexDecode *d) {
     gPortWhere = "decoding a texture";
     if (sDecWorkers < 0) {
         const char *e = getenv("BT3_TEX_THREADS");
+#ifdef __SWITCH__
+        int n = e != NULL ? atoi(e) : 2, i; /* (the three cores a game has: the game's thread on one, its sound on another) */
+#else
         int n = e != NULL ? atoi(e) : SDL_GetNumLogicalCPUCores() - 2, i;
+#endif
         sDecWorkers = n < 0 ? 0 : n > 7 ? 7 : n;
         gPortWhere = "decoding a texture (starting its workers)";
         for (i = 0; i < sDecWorkers; i++) {

@@ -91,12 +91,11 @@ its setup made from your disc). If you ran an earlier kit, the gamedata folder i
    atmosphere/contents/0100B73DEC000000/:  bt3_log.txt, bt3_watch.txt, and bt3_crash.txt if there is one (each
    start keeps the one before as bt3_log_prev.txt and bt3_watch_prev.txt: send those too if the game was started
    again since). After a crash the launcher shows the report's first lines at its next start.
-6. If the screen stays black and the console becomes slow (as with the first kits): wait a minute, close the game
-   with HOME, and send bt3_watch.txt and bt3_log.txt even if they look empty or short. bt3_watch.txt is written
-   every 2 seconds by a part of the program that watches the rest: what it was doing, and how often it used the
-   SD card. Then, in bt3_env.txt, remove the # in front of BT3_TEX_THREADS=0, start the game again, and say
-   whether it gets further that way (send bt3_watch.txt and bt3_log.txt of that start too). (To start without
-   sound: remove the # in front of BT3_NOSOUND=1.)
+6. If the game stops (a black screen, a picture that no longer moves): wait a minute, close it with HOME, and send
+   bt3_watch.txt and bt3_log.txt: bt3_watch.txt is written every 2 seconds by a part of the program that watches
+   the rest (what it was doing, how it used the SD card). If it closes by itself or the console shows an error:
+   send bt3_crash.txt if there is one, the newest file in atmosphere/crash_reports/ on the card if there is one,
+   and a photo of the error.
 
 Saves are in saves/ in that folder, as on the PC (copy them between PC and Switch). Online play is not ready yet.
 TXT

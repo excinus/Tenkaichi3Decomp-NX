@@ -94,7 +94,11 @@ def build():
     off = ["GPU", "RENDER", "CAMERA", "HIDAPI", "DIALOG", "SENSOR", "POWER", "TRAY", "HAPTIC", "VULKAN", "OPENGL",
            "OPENGLES", "SHARED", "TESTS", "EXAMPLES", "TEST_LIBRARY"]
     subprocess.run(["cmake", "-S", str(SRC), "-B", str(BUILD), "-G", "Ninja", f"-DCMAKE_TOOLCHAIN_FILE={DEVKITPRO}/cmake/Switch.cmake",
-                    "-DCMAKE_BUILD_TYPE=Release", f"-DCMAKE_INSTALL_PREFIX={PREFIX}", "-DSDL_STATIC=ON"] +
+                    "-DCMAKE_BUILD_TYPE=Release", f"-DCMAKE_INSTALL_PREFIX={PREFIX}", "-DSDL_STATIC=ON",
+                    # libnx's sysctlbyname is the BSD sockets service's (socket.o), which only answers once the
+                    # program has started that service: SDL_GetNumLogicalCPUCores asked it "hw.ncpu" and never came
+                    # back (the game stood still at its first large texture, docs/port/switch_plan.md, "Results")
+                    "-DHAVE_SYSCTLBYNAME=OFF"] +
                    [f"-DSDL_{o}=OFF" for o in off], check=True, env=env)
     subprocess.run(["cmake", "--build", str(BUILD)], check=True, env=env)
     subprocess.run(["cmake", "--install", str(BUILD)], check=True, env=env, stdout=subprocess.DEVNULL)
