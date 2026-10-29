@@ -4460,7 +4460,26 @@ converted for it has its 2D at its true shape across the whole width, the way th
   rest one page in the middle at its true shape, the bars too
   (their cells and the characters in them stay together); each player's big picture keeps to the line between the
   two (the user's choice: the art is half a 4:3 screen wide, so it ends short of the outer edge); only the stage
-  pictures fill. The other screens mark nothing and are stretched.
+  pictures fill.
+- **The other screens** (numbers 10 on: Dragon History, Ultimate Battle with Sim Dragon, Mission 100, Survival and
+  the disc fusion, World Tournament, the versus menu, Training, Evolution Z with its customising and shop, the
+  Data Center with its catalog, password and replays, Character Reference, Options, the results and selection
+  screens of those modes; 36 draw functions, converted alike) are all of one kind: a title, plates, a guide or two,
+  a message across the bottom. Each clip of a movie itself (not inside another) is measured first: drawn once with
+  `FlashDraw_Quad` recording where its quads lie instead of drawing them, its callbacks left out (they queue text),
+  no markers sent (`gPortFlashMeasure`, src/sys/gfxm_c.c). `Port_MenuClipPlace`: one touching the 4:3 screen's
+  left edge goes against the left edge, its right edge the right, otherwise by the third its middle is in; one as
+  wide as the screen is left to its pieces. The title row (`mc_title*`, `mc_icon`) is always on the left. What
+  the page draws itself, not in a clip (most screens' windows and plates), stays in the middle; on Dragon History
+  it is the scenery, which fills (with its waterfall, shimmer and fish clips). Character Reference and the catalog
+  keep their window of rows in the middle with its highlight (only the title and the guides go to the sides). A
+  screen's draw can call another's (a backdrop drawn by its own function): the pages stack.
+- Known: Character Reference's shelves are pieces of the page like its window, so they stay in the middle and meet
+  the backdrop at the 4:3 page's edges.
+- Test aids: `BT3_MENU_MODE=<n>` starts the menus at progress mode n (6 Dragon History, 13 Ultimate Battle, 33 World
+  Tournament, 38 versus, 44 Training, 48 Evolution Z, 53 Data Center, 60 Character Reference, 62 Options), and a
+  pad file for `BT3_PAD_PLAY` is two 18-byte reads a frame, so a short script of presses reaches a screen without
+  a controller.
 - Parts that keep the 4:3 screen's full-width pieces too (`*_ALL`, markers 0x26..0x28, anchors 13..15) do so with
   textured ones only: an untextured one (a fade) still covers the whole picture. A menu's narrower untextured
   pieces (a plate's plain body, the music's plate) keep their shape like its art. Backdrop clips are `mc_bg_*`

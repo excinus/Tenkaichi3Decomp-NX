@@ -9,7 +9,10 @@
 #include "sys/dma.h"
 #include "sys/gfx.h"
 #ifdef PORT
-extern int Port_MenuClipPart(const char *name); /* port/src/gs_marker.c: widescreen menus */
+extern int Port_MenuClipPart(const char *name, float x, int top); /* port/src/gs_marker.c: widescreen menus */
+extern int Port_MenuClipPlace(float x0, float x1);
+static int gPortFlashMeasure;  /* FlashDraw_Quad only measures (gPortFlashBox: the leftmost and rightmost x) */
+static float gPortFlashBox[2];
 extern int Port_MenuPart(int part);
 #endif
 #include "sys/gfxm_b_b.h"
@@ -652,15 +655,30 @@ void FlashSlot_Draw(FlashSlot *slot, FlashProp *parent, Flash *flash) {
                 prop.cx.add[i] = ({ Flash_ClampAdd(prop.cx.add[i] + parent->cx.add[i]); });
             }
         }
+#ifdef PORT
+        if (gPortFlashMeasure) { /* (measuring a clip: its shapes only, nothing else happens) */
+            FlashTl_Draw(&clip->tl, &prop);
+            return;
+        }
+#endif
         if (clip->preDraw != NULL) {
             clip->preDraw(clip->preArg);
         }
 #ifdef PORT
         {
             /* widescreen menus: the clip (and what it holds, its text too) anchored as its screen has it
-               (port/src/gs_marker.c) */
-            int part = Port_MenuClipPart(clip->name);
-            int prev = part >= 0 ? Port_MenuPart(part) : 0;
+               (port/src/gs_marker.c); a clip whose side goes by where it is is measured first */
+            int part = Port_MenuClipPart(clip->name, prop.mtx.m[2] + (f32)flash->ofs[0], parent == NULL);
+            int prev;
+            if (part == -2) {
+                gPortFlashMeasure = 1;
+                gPortFlashBox[0] = 1e9f;
+                gPortFlashBox[1] = -1e9f;
+                FlashTl_Draw(&clip->tl, &prop);
+                gPortFlashMeasure = 0;
+                part = Port_MenuClipPlace(gPortFlashBox[0], gPortFlashBox[1]);
+            }
+            prev = part >= 0 ? Port_MenuPart(part) : 0;
 #endif
         FlashTl_Draw(&clip->tl, &prop);
         if (clip->drawOver != NULL) {
@@ -869,6 +887,16 @@ void FlashDraw_Quad(FlashTex *tex, FlashQuad *q) {
     if (q->rgba[3] == 0) {
         return;
     }
+#ifdef PORT
+    if (gPortFlashMeasure) { /* widescreen menus: where the clip being measured lies (FlashSlot_Draw) */
+        s32 i;
+        for (i = 0; i < 4; i++) {
+            gPortFlashBox[0] = q->pt[i][0] < gPortFlashBox[0] ? q->pt[i][0] : gPortFlashBox[0];
+            gPortFlashBox[1] = q->pt[i][0] > gPortFlashBox[1] ? q->pt[i][0] : gPortFlashBox[1];
+        }
+        return;
+    }
+#endif
     if (tex != NULL) {
         tex0 = FlashDraw_UploadTex(tex, q->uv.tex, 0x3000);
         Dma_AddTexFlush();

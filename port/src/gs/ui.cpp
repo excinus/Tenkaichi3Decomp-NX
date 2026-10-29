@@ -1923,8 +1923,7 @@ static void ui_tab(PortVideo &v) {
                               "Stretched: the 4:3 menus stretched to the width.\n"
                               "4:3: at their own shape, with the side bars at the sides.\n"
                               "Widescreen (beta): at their own shape across the whole width, the backdrops filling it,\n"
-                              "a menu's column against the left edge. The title, the main menu and the character,\n"
-                              "stage and music select so far; the other menus are stretched.");
+                              "each menu's parts against the side they belong to.");
     }
     {
         static const char *const kBars[] = {"Black", "Border", "Fighter panels"};
