@@ -4513,7 +4513,8 @@ converted for it has its 2D at its true shape across the whole width, the way th
   positions: in a converted part it is narrowed about the same point as the pieces (the cells were cut while
   scrolling, the more the wider the picture). Character select's big pictures (taller than 300) are not cut at
   the 4:3 edges: they fade and slide outwards when a stage is chosen. The versus menu's window of modes (Single,
-  Team, DP: `mc_mode_*`) is against the left edge with its plates.
+  Team, DP: `mc_mode_*`) is against the left edge with its plates. World Tour's announcer poster is in the middle
+  and not cut at the 4:3 edges (part `PORT_MENU_CENTER_FREE`, anchor 19): it flies across the whole picture.
 - Known: Character Reference's shelves are pieces of the page like its window, so they stay in the middle and meet
   the backdrop at the 4:3 page's edges.
 - Test aids: `BT3_MENU_MODE=<n>` starts the menus at progress mode n (6 Dragon History, 13 Ultimate Battle, 33 World

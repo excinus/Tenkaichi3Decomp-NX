@@ -37,10 +37,12 @@ void Port_GsMarker(int effect) {
      PORT_MENU_PAGE_EDGE  as PAGE, and a piece cut off at the 4:3 screen's right edge (starting right of 200) against
                        the right edge, at its left edge (ending left of 312) against the left: frames whose art is
                        cut there (World Tour's timer, Character Reference's list)
+     PORT_MENU_CENTER_FREE  as CENTER, not cut at the 4:3 screen's edges: a picture that flies across the whole of
+                       the wide picture (World Tour's announcer poster)
    Which clip of a screen's movie goes where is the table in Port_MenuClipPart, by the clips' names. A screen that
    marks nothing is stretched as before. The renderer acts on the markers only with that layout chosen. */
 enum { PORT_MENU_NONE = -1, PORT_MENU_CENTER, PORT_MENU_FILL, PORT_MENU_LEFT, PORT_MENU_RIGHT, PORT_MENU_CENTER_ALL, PORT_MENU_LEFT_ALL,
-       PORT_MENU_RIGHT_ALL, PORT_MENU_PAGE, PORT_MENU_PAGE_TOP, PORT_MENU_PAGE_EDGE };
+       PORT_MENU_RIGHT_ALL, PORT_MENU_PAGE, PORT_MENU_PAGE_TOP, PORT_MENU_PAGE_EDGE, PORT_MENU_CENTER_FREE };
 static int sMenuPart = PORT_MENU_NONE;
 static int sMenuMovie;               /* which of the screen's movies is being drawn (Port_MenuMovie) */
 static int sMenuScreen;              /* PORT_MENU_SCREEN_* of the page being drawn, 0: none */
@@ -227,7 +229,7 @@ static int clip_part(const char *name, int x, int top) {
         return PORT_MENU_RIGHT; /* (Training: its plates run off the right edge) */
     }
     if (sMenuScreen == 20 && top && strcmp(name, "mc_world_chirashi") == 0) {
-        return PORT_MENU_CENTER; /* (World Tour: the announcer's poster, one picture) */
+        return PORT_MENU_CENTER_FREE; /* (World Tour: the announcer's poster, one picture flying across the screen) */
     }
     if (sMenuScreen == 13 && top && (starts(name, "mc_menu_plate_") || starts(name, "mc_level_plate_") || starts(name, "mc_scenario"))) {
         return PORT_MENU_CENTER; /* (Dragon History: its plates at their true shape, over the scenery that fills) */

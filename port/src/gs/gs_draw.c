@@ -1618,7 +1618,7 @@ void GsGpu_Draw(int type, int ctx, const GsVertex *v) {
     /* (Not the cross-fade's picture: it is the whole frame as it was shown, wide view and all, drawn back over the
        whole frame in strips. Each strip is narrower than the screen, so the rule below took it for a piece of 2D
        art and the old shot was drawn at three quarters of the width over the new one: seen by the user.) */
-    if (Port_IsWide() && (!gPortMenuMode || ((gsAnchor == 9 || (gsAnchor >= 11 && gsAnchor <= 18)) && Port_MenusWide()) || (gsAnchor == 7 && Port_PageAspectMilli() > 1340) ||
+    if (Port_IsWide() && (!gPortMenuMode || ((gsAnchor == 9 || (gsAnchor >= 11 && gsAnchor <= 19)) && Port_MenusWide()) || (gsAnchor == 7 && Port_PageAspectMilli() > 1340) ||
                           (battleText && Port_PageAspectMilli() > 1340)) &&
         !sWholeFrame && !d.tex_is_target && !tbo && (type == 6 || fst || battleText || gsAnchor == 8 || (gPortMenuMode && gsAnchor >= 9)) &&
         gsTargets[d.target].fbp == (uint32_t)gGsMainFbp) {
@@ -1650,7 +1650,7 @@ void GsGpu_Draw(int type, int ctx, const GsVertex *v) {
                it: it fills the width; untextured (a fade, a tint), in a part that keeps such pieces too as well.
                A menu's untextured pieces narrower than that, a plate's plain body, keep their shape as its art does) */
             pivot = -1.0f;
-        } else if (gsAnchor == 9 || (gsAnchor >= 11 && gsAnchor <= 18)) {
+        } else if (gsAnchor == 9 || (gsAnchor >= 11 && gsAnchor <= 19)) {
             /* A menu screen converted for widescreen (Port_MenuPage, gs_marker.c): each part at its true shape about
                the middle, the left edge or the right edge, the long bars too (some of a bar's pieces are wider than
                480, some not: they have to stay together). What fills the width is marked 10 and not narrowed. */
@@ -1707,7 +1707,7 @@ void GsGpu_Draw(int type, int ctx, const GsVertex *v) {
             if (noclip < 0) {
                 noclip = getenv("BT3_MENU_NOCLIP") != NULL;
             }
-            if ((gsAnchor == 9 || (gsAnchor >= 11 && gsAnchor <= 18)) && (d.scissor[0] > 0 || d.scissor[0] + d.scissor[2] < 512 * SCALE)) {
+            if ((gsAnchor == 9 || (gsAnchor >= 11 && gsAnchor <= 19)) && (d.scissor[0] > 0 || d.scissor[0] + d.scissor[2] < 512 * SCALE)) {
                 /* The game's own clipping window (a roster's bar, which cells scroll through) is in the 4:3 screen's
                    positions: it is narrowed about the same point as the piece, or the cells moved out of it and were
                    cut while scrolling (the more, the wider the picture) */
@@ -1717,7 +1717,7 @@ void GsGpu_Draw(int type, int ctx, const GsVertex *v) {
                 d.scissor[0] = (int)(a * (float)SCALE);
                 d.scissor[2] = (int)(b * (float)SCALE + 0.5f) - d.scissor[0];
             }
-            if ((gsAnchor == 9 || (gsAnchor >= 11 && gsAnchor <= 18)) && !noclip && !(gsAnchor == 13 && y1 - y0 >= 300.0f)) {
+            if ((gsAnchor == 9 || (gsAnchor >= 11 && gsAnchor <= 19)) && !noclip && !(gsAnchor == 13 && y1 - y0 >= 300.0f) && gsAnchor != 19) {
                 /* and what lies beyond the page's edge (plates sliding in) stays out of sight, as on the 4:3 screen.
                    Not character select's big pictures (13, taller than 300): they slide outwards when a stage is
                    chosen, and are not parked off the screen. */
@@ -1999,7 +1999,7 @@ void GsGpu_Native(int effect) {
 
     /* 1 = outline. 2 (the see-through tint) is drawn by the generic table pass now (depth_clut), from the game's
        own table. */
-    if (effect >= 0x22 && effect <= 0x2B) { /* widescreen menus: centre / fill / left / right; centre, left, right, bars too; page; top; edge */
+    if (effect >= 0x22 && effect <= 0x2C) { /* widescreen menus: centre / fill / left / right; centre, left, right, bars too; page; top; edge */
         gsAnchor = effect - 0x22 + 9;
         return;
     }
