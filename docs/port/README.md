@@ -4506,7 +4506,8 @@ converted for it has its 2D at its true shape across the whole width, the way th
   History's plates at their true shape over its filling scenery; the character selects of Ultimate Battle and the
   World Tournament (15, 19, 23..25) as one page whose full-width pieces fill (its message window), the player's
   `*_l` plates and text against the left edge, the roster, its cells and the item windows at their true shape in
-  the middle; character select's gold corner clouds (sprites up to 160 wide and 140 high from the top edge, not
+  the middle, the roster and its cells against the left edge as the versus one's (the user's choice); character
+  select's title row on the left and its gold corner clouds (sprites up to 260 wide and 140 high from the top edge, not
   the big pictures) against their corner.
 - Known: Character Reference's shelves are pieces of the page like its window, so they stay in the middle and meet
   the backdrop at the 4:3 page's edges.

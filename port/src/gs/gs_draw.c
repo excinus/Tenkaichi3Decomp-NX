@@ -1655,7 +1655,7 @@ void GsGpu_Draw(int type, int ctx, const GsVertex *v) {
                the middle, the left edge or the right edge, the long bars too (some of a bar's pieces are wider than
                480, some not: they have to stay together). What fills the width is marked 10 and not narrowed. */
             pivot = gsAnchor == 11 || gsAnchor == 14 ? 0.0f : gsAnchor == 12 || gsAnchor == 15 ? 512.0f : 256.0f;
-            int corner = gsAnchor == 16 || gsAnchor == 17 || gsAnchor == 18 || (gsAnchor == 13 && x1 - x0 <= 160.0f && y1 <= 140.0f);
+            int corner = gsAnchor == 16 || gsAnchor == 17 || gsAnchor == 18 || (gsAnchor == 13 && x1 - x0 <= 260.0f && y1 <= 140.0f);
             /* (13, character select: only a sprite the size of a corner's cloud, not the big pictures from the top) */
             if ((corner && y0 <= 8.0f && x0 >= 256.0f && x1 >= 511.5f) ||
                 (gsAnchor == 17 && y1 <= 120.0f && x0 >= 256.0f)) {

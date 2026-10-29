@@ -236,8 +236,10 @@ static int clip_part(const char *name, int x, int top) {
         if (n > 2 && name[n - 2] == '_' && name[n - 1] == 'l' && !starts(name, "mc_single_chara_")) {
             return PORT_MENU_LEFT;
         }
-        if (starts(name, "mc_chara_chip_") || strcmp(name, "mc_plate") == 0 || starts(name, "mc_yajirusi_") || starts(name, "mc_custom_") ||
-            starts(name, "mc_item_") || starts(name, "mc_icon_item_")) {
+        if (starts(name, "mc_chara_chip_") || strcmp(name, "mc_plate") == 0 || starts(name, "mc_yajirusi_")) {
+            return PORT_MENU_LEFT_ALL; /* (the player's roster against the left edge, as the versus one's: the user's choice) */
+        }
+        if (starts(name, "mc_custom_") || starts(name, "mc_item_") || starts(name, "mc_icon_item_")) {
             return PORT_MENU_CENTER_ALL;
         }
     }
@@ -254,7 +256,7 @@ static int clip_part(const char *name, int x, int top) {
     if (sMenuScreen == 39 && top && starts(name, "mc_bottom_plate_")) {
         return PORT_MENU_LEFT; /* (Options: "EXIT" below them, from the left) */
     }
-    if (sMenuScreen >= 10 && top && (starts(name, "mc_title") || strcmp(name, "mc_icon") == 0)) {
+    if ((sMenuScreen >= 10 || sMenuScreen == 3) && top && (starts(name, "mc_title") || strcmp(name, "mc_icon") == 0)) {
         return PORT_MENU_LEFT; /* (the title row against the left edge, as on the main menu) */
     }
     if (sMenuScreen == 13 && (starts(name, "mc_yuragi_") || starts(name, "mc_taki") || starts(name, "mc_sakana"))) {
