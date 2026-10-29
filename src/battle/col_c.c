@@ -1088,7 +1088,9 @@ FontGlyph *Font_SearchGlyph(FontSlot *slot, u16 ch) {
 FontCmd *Font_AllocCmd(void) {
 #ifdef PORT
     if (gFontCmdCount < FONT_PART_MAX) {
-        sFontPart[gFontCmdCount] = (signed char)Port_MenuPartNow();
+        int part = Port_MenuPartNow();
+        sFontPart[gFontCmdCount] = (signed char)(part == 1 || part == 8 ? 0 : part); /* (text is never stretched: in a
+            part that fills the width, 1, or the item shop's page, 8, whose room fills it, it is kept in the middle, 0) */
     }
 #endif
     return &gFontCmds[gFontCmdCount++];

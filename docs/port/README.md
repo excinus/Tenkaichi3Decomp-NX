@@ -4517,7 +4517,12 @@ converted for it has its 2D at its true shape across the whole width, the way th
   with a mask clip (`mc_chara_mask`, the tournament's character select) has the mask with the roster: left in the
   middle, it hid the leftmost cells. World Tour's window of a tournament's prizes, difficulty and number of
   characters is in the middle with its frame (a piece of the page), its text, titles, digits and balls with it
-  (`mc_menu_text_*`, `mc_plate_text_*`, `mc_suji_01`, `mc_dragonball_off_*`); its list and timer stay on the right. World Tour's announcer poster is in the middle
+  (`mc_menu_text_*`, `mc_plate_text_*`, `mc_suji_01`, `mc_dragonball_off_*`); its list and timer stay on the right.
+- Evolution Z (42) and Training (18), like Dragon History, have their page's own pieces filling the width: their
+  scenery (Kame House, the training ground) is drawn by the page in pieces, which narrowed broke it into blocks.
+  The item shop's page (anchor 17) fills likewise, its counters still against the right edge. Text queued in a
+  part that fills (their message windows) is kept at its true shape in the middle (`Font_AllocCmd`). World Tour's
+  window arrows (`mc_yajirusi_l` / `_r`, inside the list's arrow clip) are with the window (not seen by picture). World Tour's announcer poster is in the middle
   and not cut at the 4:3 edges (part `PORT_MENU_CENTER_FREE`, anchor 19): it flies across the whole picture.
 - Known: Character Reference's shelves are pieces of the page like its window, so they stay in the middle and meet
   the backdrop at the 4:3 page's edges.

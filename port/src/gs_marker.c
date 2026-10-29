@@ -99,7 +99,7 @@ void Port_MenuPage(int screen) {
     /* (the character selects of Ultimate Battle and the World Tournament, 15, 19, 23, 24, 25, as character select) */
     Port_MenuPart(screen == 0 ? PORT_MENU_NONE : screen == 2 ? PORT_MENU_LEFT
                   : screen == 3 || screen == 37 || screen == 44 ? PORT_MENU_CENTER_ALL
-                                                : screen == 13 ? PORT_MENU_FILL : screen == 38 ? PORT_MENU_PAGE_TOP
+                                                : screen == 13 || screen == 42 || screen == 18 ? PORT_MENU_FILL : screen == 38 ? PORT_MENU_PAGE_TOP
                                                 : screen == 17 || screen == 20 ? PORT_MENU_PAGE_EDGE
                                                 : screen >= 10 ? PORT_MENU_PAGE : PORT_MENU_CENTER);
 }
@@ -206,6 +206,10 @@ static int clip_part(const char *name, int x, int top) {
     if (sMenuScreen == 38 && top && (starts(name, "mc_pay_num_") || starts(name, "mc_shop_num_") || starts(name, "mc_item_num_"))) {
         return PORT_MENU_RIGHT; /* (the item shop: the digits of its counters of zenni and of the share collected; their
                                    frames are the page's own pieces, PORT_MENU_PAGE_TOP) */
+    }
+    if (sMenuScreen == 20 && (strcmp(name, "mc_yajirusi_l") == 0 || strcmp(name, "mc_yajirusi_r") == 0)) {
+        return PORT_MENU_CENTER; /* (World Tour: the window's left and right arrows, inside the list's arrow clip
+                                    mc_yajirusi_u_l, which is on the right: with the window, in the middle) */
     }
     if (sMenuScreen == 20 && top && (starts(name, "mc_menu_text_") || strcmp(name, "mc_suji_01") == 0 || starts(name, "mc_dragonball_off_") ||
                                      starts(name, "mc_plate_text_"))) {
