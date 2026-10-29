@@ -333,7 +333,8 @@ let the Switch setup make it from your disc image. Start it with the launcher (T
 menu, through a game: hold R while starting one) or, later, the NSP. See docs/port/switch_plan.md.
 
 Controllers: by position, as a PS2 pad (B is Cross, A is Circle, Y is Square, X is Triangle; L/R and ZL/ZR are
-L1/R1 and L2/R2). + and - together open the settings window; the touch screen works as the mouse there.
+L1/R1 and L2/R2). + and - pressed together open the settings window (the PC's F1): the D-pad moves, B (Cross)
+selects, A (Circle) goes back, L/R change the tab, the touch screen works as a mouse; "Exit game" ends the game.
 Saves are kept in saves/, as on the PC: they can be copied between the two. A file placed in gamedata/mods/<same
 path as the original> replaces the original. Texture packs (PCSX2 naming) go into textures/, stages and music from
 outside the disc into stages/ and songs/: see the note in each folder.

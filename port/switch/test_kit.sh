@@ -78,8 +78,9 @@ its setup made from your disc). If you ran an earlier kit, the gamedata folder i
    atmosphere/contents/0100B73DEC000000/  on the card, next to Tenkaichi3Decomp.
 3. On the Switch, start the homebrew menu THROUGH A GAME (hold R while starting any game), then "Tenkaichi3Decomp".
 4. Play. The controllers work as a PS2 pad by position (B is Cross, A is Circle, Y is Square, X is Triangle;
-   L/R and ZL/ZR are L1/R1 and L2/R2). + and - together open the settings window (F1 on the PC); the touch screen
-   works as the mouse there. F1 > Exit game ends it.
+   L/R and ZL/ZR are L1/R1 and L2/R2). + and - pressed together open the settings window (what the PC opens with
+   its F1 key): the D-pad moves, B (Cross) selects, A (Circle) goes back, L/R change the tab, and the touch screen
+   works as a mouse there. Its "Exit game" button ends the game; its Controls tab changes the buttons.
 5. Tell what works and what does not (picture, sound, controllers, menus, a fight, its speed), and send from
    atmosphere/contents/0100B73DEC000000/:  bt3_log.txt, and bt3_crash.txt if there is one. After a crash the
    launcher shows the report's first lines at its next start.
