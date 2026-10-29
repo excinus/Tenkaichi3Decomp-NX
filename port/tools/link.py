@@ -59,6 +59,7 @@ def link_nx(objs, extra):
     env = dict(os.environ, DEVKITPRO=str(DEVKITPRO))
     # (gcc, not g++: the stubs are C; the C++ library for the settings window is named)
     cmd = [dkp("gcc"), f"-specs={ROOT / 'port/switch/nx.specs'}"] + NX_ARCH + ["-w", "-o", str(EXE)] + extra + objs + [str(dyn)] + \
+          ([f"-L{sdl3() / 'lib'}", "-lSDL3"] if sdl3() else []) + \
           [f"-L{DEVKITPRO}/portlibs/switch/lib", f"-L{DEVKITPRO}/libnx/lib", "-lstdc++", "-lnx", "-lm",
            f"-Wl,--defsym=__start__={NX_WINDOW + 0x20000000:#x}", "-Wl,--wrap=main", f"-Wl,-Map={EXE}.map"]
     argsfile = B / "link_nx64.rsp"

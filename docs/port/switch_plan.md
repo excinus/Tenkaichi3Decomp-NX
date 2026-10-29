@@ -3,16 +3,21 @@
 The Switch port is IN PROGRESS: the game builds for the Switch, but nothing of it runs there yet. This file is the design, the plan and the
 record of what was checked; update it as phases land, as docs/port/macos_plan.md is for the Mac.
 
-Status 2026-10-29: phase 2 done, phase 3 (the launcher, the demo fight on a console) next.
+Status 2026-10-29: phase 3 under way: the launcher, SDL3 for the Switch and the test kit are built; the demo
+fight on a console is next (the `switch` workflow's artifact `switch-test-kit`, its README.txt).
 - Phase 1: `port/switch/spike`, a homebrew program that checks on a console what the port depends on (memory,
   speed, OpenGL), passed everything in three runs on a console (see "Results"): the 4 GB window maps at the fixed
   place every time, code runs at W + 0x20000000, every OpenGL program of the renderer compiles, and the game's
   software float is 3.4 to 4.2 times slower than on the build machine's Xeon at the stock 1020 MHz (about 2.2 times
   at 1785 MHz).
 - Phase 2: `BT3_CC=nx64` compiles the whole game and links it with libnx into `port/build/bt3_nx`, an ELF at the
-  window + 0x20000000 (see "The build"), in the `switch` workflow's `game` job. What it calls that the Switch does
-  not have yet is a stub (`port/build/stubs.txt`): SDL3 (phase 4), `eglGetProcAddress` (Mesa, phase 4), and
-  `execv`, `execvp`, `waitpid` (the Switch has no processes); the game's own stubs are the same as Linux's.
+  window + 0x20000000 (see "The build"), in the `switch` workflow's `game` job. The game's own stubs are the same
+  as Linux's.
+- Phase 3 so far: the launcher (`port/switch/launcher`, an .nro for now; "The launcher"); SDL3 itself built for the
+  Switch (`port/switch/sdl3`, "The platform layer"), so every SDL call of the port is SDL's own code, with dummy video
+  and sound until phase 4; the game's start on the Switch (its log in bt3_log.txt, test settings from bt3_env.txt);
+  `port/switch/test_kit.sh`. Left as stubs: `eglGetProcAddress` (Mesa, phase 4) and `execv`, `execvp`, `waitpid`
+  (the Switch has no processes), none of them on the demo fight's way.
 
 ## Ground rule
 
@@ -77,17 +82,29 @@ The window is at a fixed place, W = 0x4000000000 (256 GB; `NX_WINDOW` in port/to
 in port/src/port_addr.h), and the program is linked for W + 0x20000000 (see "The build"). So the NSP holds a small
 launcher in the manner of nx-hbloader, which rarely changes:
 
-1. finds the game's folder (`sdmc:/atmosphere/contents/0100B73DEC000000/`; a message with what to do when it is
-   missing: run the setup, copy the folder, check the card);
+1. finds the game's folder: next to the launcher if `Tenkaichi3Decomp` is there, else
+   `sdmc:/atmosphere/contents/0100B73DEC000000/` (a message with what to do when it is missing);
 2. checks that the window W .. W + 4 GB is free (svcQueryMemory, clear of the heap, alias and stack regions, which
-   ASLR places anew at each start). The spike found it free in all three starts; when it is not, the launcher
-   starts the application again (`appletRestartProgram`), which places those regions elsewhere;
+   ASLR places anew at each start) and reserves it. The spike found it free in all three starts; when it is not, the
+   launcher says so (the NSP's will start the application again, `appletRestartProgram`, which places those regions
+   elsewhere);
 3. loads the program `Tenkaichi3Decomp` (an ELF: its three segments) at W + 0x20000000, with
    svcMapProcessCodeMemory and svcSetProcessMemoryPermission (code read-execute, read-only data, data read-write),
-   as homebrew loaders map a program;
-4. starts it with the homebrew ABI (as nx-hbloader does: the heap, the process handle, the allowed calls, the
-   arguments with the program's path first), and when it returns asking to be loaded again (Restart now after an
-   update), unmaps it and loads the new one.
+   from the process's heap: its first 16 MB are the launcher's own C heap, then the segments, and the rest is the
+   game's heap;
+4. closes its own system services (an application holds its applet proxy only once; the game's libnx opens its
+   own), keeps its thread data aside, and starts the program with the homebrew ABI as nx-hbloader does (the heap,
+   the process handle, the allowed calls, the applet type, `argv[0]` = the program's full path, which makes the
+   game's folder its working folder). When the program ends it comes back (`port/switch/launcher/source/
+   trampoline.s` keeps the registers a C caller keeps, which the program's exit does not), takes its services
+   again, and shows the result and the end of `bt3_log.txt`. While the program runs, an exception reaches the
+   launcher's start first and is passed to the program's (its crash report, plat_crash.c), as nx-hbloader does.
+
+As built (phase 3) it is an .nro for the homebrew menu (`port/switch/launcher/build.sh` ->
+`port/build/switch/Tenkaichi3Decomp.nro`). When the game ends, its segments stay mapped and the launcher only shows
+the result and exits: the game's threads are not ended by its exit, and one could still run in its code. Restart now
+after an update (phase 5) is therefore planned as `appletRestartProgram` (the whole process anew) for the NSP, not
+as a second load in the same process.
 
 The program then maps the game's regions itself, at W + their PS2 addresses, as it does on every system
 (port/src/plat_mem.c, its Switch branch, the same calls): the heap 0x003BE000-0x02000000, its stack at 0x02000000,
@@ -102,9 +119,11 @@ svcQueryMemory.
 ### The build (variant `nx64`), as built
 
 ```
-port/switch/sdl3_headers.sh                                  # once: SDL3's headers (the functions come in phase 4)
+python3 port/switch/sdl3/build.py                            # once: SDL3 for the Switch ("The platform layer")
 BT3_CC=nx64 BT3_SKELETON=1 python3 port/tools/undefined.py   # compile
 BT3_CC=nx64 BT3_SKELETON=1 python3 port/tools/link.py        # -> port/build/bt3_nx, .dat, .mem, .map
+port/switch/launcher/build.sh                                # -> port/build/switch/Tenkaichi3Decomp.nro
+port/switch/test_kit.sh                                      # -> port/build/switch/test-kit (phase 3)
 ```
 
 Needs devkitPro's devkitA64 with libnx and the Switch portlibs (`DEVKITPRO`, default /opt/devkitpro; the
@@ -120,7 +139,7 @@ works") with ELF instead of Mach-O:
   `p270:32:32-p271:32:32`). The pass takes `-bt3-window-base=0x4000000000`: W in constant data is that number (on
   macOS it is `_mh_execute_header - 0x20000000`); code still loads `Port_Window`.
 - **The renderer, the settings window, ImGui** (hardware float): devkitA64's GCC 15 with libnx's flags (`-mtp=soft`),
-  SDL3's headers. ImGui's OpenGL loader has a Switch branch (`eglGetProcAddress`; there are no shared libraries).
+  SDL3 for the Switch (linked as `libSDL3.a`). ImGui's OpenGL loader has a Switch branch (`eglGetProcAddress`; there are no shared libraries).
   `gs_gpu.c` gets placeholder SPIR-V: the Switch draws only through OpenGL.
 - **Data tables** (`port/data/*.s`): `macho.elf_asm`, a pointer `.long g` becomes `.long g - 0x4000000000` (GNU ld
   resolves it to the window offset). The game's `_ctype_` (the PS2 C library's character table, read by the
@@ -150,11 +169,24 @@ the GPU back end (counted 2026-10-29: windows and the GL context, gamepads and a
 threads, mutexes, conditions, atomics, timers, files and folders, properties, processes for the PC's helpers), and
 SDL_GPU only in `gs_gpu.c`, which the Switch does not use.
 
-Plan: a `port/src/nx/` layer that provides that subset of the SDL3 API on top of devkitPro's SDL2 (`switch-sdl2`:
-EGL window and GL context, Joy-Con and Pro Controller, audio, threads), with the few things SDL2 lacks done with
-libnx directly (`SDL_GetBasePath` = the game's folder; no processes: the PC's helper programs are not run; software
-keyboard for text). Writing the subset directly on libnx (nwindow + EGL, hid, audren) is the alternative if the SDL2
-layer costs speed.
+As built (phase 3): **SDL3 itself, built for the Switch** (`port/switch/sdl3/build.py`: SDL 3.4.12's own source,
+the version of the PC release, with devkitPro's CMake toolchain, as a static library). So everything the port uses
+that is not tied to the hardware is SDL's own code, the same as on PC: audio streams and their resampling,
+surfaces and PNG loading, properties, file streams, events, hints, the gamepad layer and its virtual joystick.
+The Switch is a platform block like SDL's 3DS one (`port/switch/sdl3/switch.cmake`, put into SDL's tree and named
+in its CMakeLists.txt at build time): SDL's POSIX back ends for threads, timers, time and file operations (libnx
+gives newlib those calls), a file-system back end of the port's (`src/filesystem/switch`: the base path is the
+program's folder, from `argv[0]`), and no-op POSIX scheduling calls and `pthread_sigmask` that newlib lacks here
+(`src/core/switch`; threads keep their default priority). SDL's dynamic API is switched off (no shared libraries).
+Video and sound are SDL's dummy drivers so far, and there are no controllers.
+
+Phase 4 adds the Switch's drivers in the same place, after the open devkitPro SDL2 port's (zlib): video (an EGL
+window on `nwindowGetDefault()` and an OpenGL context through Mesa, docked and handheld sizes), audio (audren or
+audout), joystick (hid: Joy-Con pair, Pro Controller, handheld), software keyboard for text. (The first plan, the
+SDL3 calls written over devkitPro's SDL2, is dropped: the two libraries' functions have the same names.)
+
+These files are the port's, not SDL's, and are not meant to be offered to SDL: SDL does not accept code written with
+AI tools (its CLAUDE.md), and they were. Kept in this repository and applied at build time only.
 
 - **Renderer**: the OpenGL 3.3 back end (`gs_gl.c`) on devkitPro's Mesa (nouveau). The settings window (ImGui) has
   its OpenGL back end already. 1280x720 handheld, 1920x1080 docked; internal resolution 1x or 2x.
@@ -182,7 +214,7 @@ an `.nro` from the homebrew menu through a game (hold R): the same folder, no HO
 | 0. Design, spike | This file; `port/switch/spike` builds in CI (`switch` workflow, artifact `bt3-switch-spike`). **Done.** |
 | 1. Spike on a console | Its report (`sdmc:/switch/bt3_spike.txt`) is in this file: the window maps, code runs at W + 0x20000000, the speed is known, every GL program compiles. **Done** (2026-10-29): three runs, two at the stock clock, all passed. |
 | 2. The game builds for the Switch | `BT3_CC=nx64` compiles and links the whole game with libnx (`BT3_SKELETON=1`), in CI. **Done** (2026-10-29): `port/build/bt3_nx`; stubs for SDL3 and four system calls. |
-| 3. The demo fight on a console | The launcher loads the game; the attract-demo fight runs without a picture and its `BT3_HASH` lines (written to the card) equal Linux's (`compare_hash.py`). |
+| 3. The demo fight on a console | The launcher loads the game; the attract-demo fight runs without a picture and its `BT3_HASH` lines (written to the card) equal Linux's (`compare_hash.py`). Built (2026-10-29): the launcher, SDL3 for the Switch, the test kit; the run on a console is next. |
 | 4. Playable | The platform layer: picture (GL), sound, controllers; the game plays from boot to a fight and saves. |
 | 5. The package | The setup's Switch mode, the NSP from the player's keys, `Tenkaichi3Decomp-switch.zip` in the release workflow, the updater's Switch asset and its restart through the launcher. |
 | 6. Online | A lobby between a Switch and a PC, by code and by address. |
@@ -196,6 +228,14 @@ times. Whether that is full speed is known only when the game's own demo fight r
 field on Linux, multiplied by that, against the 16.7 ms of a field. If the console is too slow for full speed even with the renderer
 on another core, the options are the hot paths in faster exact code (the vector library in integer NEON),
 or a mode that skips drawing frames.
+
+## The demo fight on a console (phase 3): how to run it
+
+The `switch` workflow's artifact `switch-test-kit` (or `port/switch/test_kit.sh` after a build): the game's program,
+its lists (`.dat`, `.mem`), a `bt3_env.txt` with the PC self-test's settings and `BT3_HASH=bt3_hash.txt`, and the
+launcher. Its README.txt has the steps: the kit's folders to the SD card, the PC installation's `gamedata` into the
+title's folder, the launcher from the homebrew menu through a game, and the same fight on the PC for comparison
+(`compare_hash.py bt3_hash_pc.txt bt3_hash.txt --fight`).
 
 ## The spike (phase 1): how to run it
 

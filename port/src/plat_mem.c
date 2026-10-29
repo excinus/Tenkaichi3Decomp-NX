@@ -292,6 +292,54 @@ int __wrap_main(int argc, char **argv) {
 /* The window's base for the game's code (port/tools/macwin/macwin.cpp loads it in every function). */
 void *Port_Window = (void *)PORT_WINDOW;
 
+/* Before everything else (and before any getenv): the window reserved, and the Switch has neither a terminal nor
+   environment variables.
+   - the program's output (stdout and stderr) goes to bt3_log.txt in its folder, the one before kept as
+     bt3_log_prev.txt, as on Windows (plat_crash.c);
+   - bt3_env.txt in its folder, if there is one, sets the environment variables the PC builds take from the shell:
+     one NAME=value per line, # for a comment (for tests, e.g. BT3_DEMO=1 and BT3_GS=none for the demo fight).
+   The folder is the working folder: libnx starts there, the launcher naming the program by its full path. */
+__attribute__((constructor(101))) static void nx_start(void) {
+    FILE *f;
+    char line[1024];
+
+    /* the window is this program's: nothing libnx maps later (threads' stacks, shared memory) may go there */
+    virtmemLock();
+    virtmemAddReservation((void *)PORT_WINDOW, 0x100000000ull);
+    virtmemUnlock();
+
+    remove("bt3_log_prev.txt");
+    rename("bt3_log.txt", "bt3_log_prev.txt");
+    f = fopen("bt3_log.txt", "w");
+    if (f != NULL) {
+        fclose(f);
+        if (freopen("bt3_log.txt", "a", stdout) != NULL) {
+            setvbuf(stdout, NULL, _IOLBF, 0);
+        }
+        if (freopen("bt3_log.txt", "a", stderr) != NULL) {
+            setvbuf(stderr, NULL, _IOLBF, 0);
+        }
+    }
+    f = fopen("bt3_env.txt", "r");
+    if (f == NULL) {
+        return;
+    }
+    while (fgets(line, sizeof(line), f) != NULL) {
+        char *eq, *end = line + strlen(line);
+        while (end > line && (end[-1] == '\n' || end[-1] == '\r' || end[-1] == ' ')) {
+            *--end = '\0';
+        }
+        eq = strchr(line, '=');
+        if (line[0] == '#' || eq == NULL || eq == line) {
+            continue;
+        }
+        *eq = '\0';
+        setenv(line, eq + 1, 1);
+        fprintf(stderr, "bt3: bt3_env.txt: %s=%s\n", line, eq + 1);
+    }
+    fclose(f);
+}
+
 static void *map_at(uint32_t addr, uint32_t size) {
     uint64_t at = (PORT_WINDOW + addr) & ~(uint64_t)0xFFF, n = ((PORT_WINDOW + addr + size + 0xFFF) & ~(uint64_t)0xFFF) - at;
     Handle self = envGetOwnProcessHandle();

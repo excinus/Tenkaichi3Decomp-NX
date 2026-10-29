@@ -69,12 +69,12 @@ DATA = ROOT / ("port/build/obj_data" if not BITS64 else "port/build/obj_data_win
 EXE = ROOT / "port/build" / {"gcc": "bt3", "clang64": "bt3_64", "win64": "bt3.exe", "mac64": "bt3_mac", "nx64": "bt3_nx"}.get(VARIANT, "bt3_" + VARIANT)
 
 def sdl3():
-    """The folder with SDL3's include/ and lib/ for the Windows build (for the Switch build: SDL3's include/, the
-    headers only: port/switch/sdl3_headers.sh), or None when the compiler finds it itself."""
+    """The folder with SDL3's include/ and lib/ for the Windows and Switch builds (the Switch's: SDL built by
+    port/switch/sdl3/build.py), or None when the compiler finds it itself."""
     if NX:
         if os.environ.get("BT3_SDL3"):
             return pathlib.Path(os.environ["BT3_SDL3"])
-        found = sorted((ROOT / "port/build/nx").glob("SDL3-*"))
+        found = sorted((ROOT / "port/build/nx").glob("SDL3-*-switch"))
         return found[-1] if found else None
     if not WIN:
         return None
