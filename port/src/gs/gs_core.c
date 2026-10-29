@@ -1524,7 +1524,7 @@ void Port_GsVif1Chain(uint32_t tadr, int tte) {
                100 ms or more always, without BT3_GS_VERBOSE: the other player's copy waits for this one meanwhile;
                the time this copy itself waited for the other player is said apart, gs/net.c) */
             extern unsigned gGpuNewTex, gGpuNewTexPixels, gGpuNewPipes;
-            extern uint64_t gGpuTexNs, gGpuPipeNs, gGpuEndNs, gPortNetWaitNs;
+            extern uint64_t gGpuTexNs, gGpuPipeNs, gGpuEndNs, gPortNetWaitNs, gGpuArtNs, gGpuCheckNs, gGpuTextNs;
             extern int Port_NetActive(void);
             uint64_t netWait = gPortNetWaitNs;
             gPortNetWaitNs = 0;
@@ -1533,8 +1533,10 @@ void Port_GsVif1Chain(uint32_t tadr, int tte) {
                                 "%u new textures (%u pixels), %u new pipelines\n",
                         sFrame, (double)work / 1e6, (double)(tChain - start) / 1e6, (double)netWait / 1e6, (double)(t - tChain) / 1e6, gGpuNewTex,
                         gGpuNewTexPixels, gGpuNewPipes);
-                fprintf(stderr, "slow:   of the display list time: texture decoding %.1f ms, pipeline creation %.1f ms, submitting the frame %.1f ms\n",
-                        (double)gGpuTexNs / 1e6, (double)gGpuPipeNs / 1e6, (double)gGpuEndNs / 1e6);
+                fprintf(stderr, "slow:   of the display list time: texture decoding %.1f ms (of it European menu art %.1f, battle text checks "
+                                "%.1f, menu text %.1f), pipeline creation %.1f ms, submitting the frame %.1f ms\n",
+                        (double)gGpuTexNs / 1e6, (double)gGpuArtNs / 1e6, (double)gGpuCheckNs / 1e6, (double)gGpuTextNs / 1e6,
+                        (double)gGpuPipeNs / 1e6, (double)gGpuEndNs / 1e6);
             }
             /* per second: where the work goes (the game's own code, walking the list, and of that the GPU side) */
             sumGame += tChain - start > waited ? tChain - start - waited : 0;
@@ -1543,7 +1545,7 @@ void Port_GsVif1Chain(uint32_t tadr, int tte) {
             sumPipe += gGpuPipeNs;
             sumEnd += gGpuEndNs;
             gGpuNewTex = gGpuNewTexPixels = gGpuNewPipes = 0;
-            gGpuTexNs = gGpuPipeNs = gGpuEndNs = 0;
+            gGpuTexNs = gGpuPipeNs = gGpuEndNs = gGpuArtNs = gGpuCheckNs = gGpuTextNs = 0;
         }
         if (getenv("BT3_BURN_MS") != NULL) { /* testing: a slower machine, by burning time in every frame */
             uint64_t until = now_ns() + (uint64_t)atoi(getenv("BT3_BURN_MS")) * 1000000ull;
@@ -1648,9 +1650,16 @@ static void walk_chain(uint32_t tadr, int tte, void (*block)(const uint32_t *tag
 
     for (guard = 0; guard < 100000; guard++) {
         const uint32_t *tag = (const uint32_t *)Port_Ptr(tadr);
-        uint32_t qwc = tag[0] & 0xFFFF, id = (tag[0] >> 28) & 7, addr = tag[1]; /* a game address: all 32 bits */
+        uint32_t qwc, id, addr; /* (addr: a game address, all 32 bits) */
         const uint32_t *data;
         int end = 0;
+
+        if (tag == NULL) { /* (a chain led to address 0: see below) */
+            break;
+        }
+        qwc = tag[0] & 0xFFFF;
+        id = (tag[0] >> 28) & 7;
+        addr = tag[1];
 
         switch (id) {
         case 0: data = (const uint32_t *)Port_Ptr(addr); end = 1; break;                 /* REFE */
@@ -1664,7 +1673,20 @@ static void walk_chain(uint32_t tadr, int tte, void (*block)(const uint32_t *tag
         if (sDumpFrame == (int)sFrame) {
             fprintf(stderr, "  dma tag at %08x: id %u qwc %u addr %08x | %08x %08x (depth %u)\n", (unsigned)Port_Addr(tag), id, qwc, addr, tag[2], tag[3], sp);
         }
-        block(tag, data, qwc, tte);
+        if (data == NULL && qwc != 0) {
+            /* A block of data at address 0 (REF / REFS / REFE with address 0). The PlayStation 2 would read its first
+               kilobytes there; here address 0 is not the game's memory (a game address is an offset in the window,
+               and 0 is NULL): left out, said once. Seen on the Switch at the start of a fight (a crash in vif()
+               before this, 2026-10-29). */
+            static int told;
+            if (!told) {
+                told = 1;
+                fprintf(stderr, "bt3: gs: frame %u: a DMA tag at %08x (id %u, %u quadwords) refers to address 0: left out\n", sFrame,
+                        (unsigned)Port_Addr(tag), id, qwc);
+            }
+        } else {
+            block(tag, data, qwc, tte);
+        }
         if (end) {
             break;
         }

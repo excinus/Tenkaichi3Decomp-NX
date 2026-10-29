@@ -2422,6 +2422,13 @@ unsigned MenuLabels_ArtKey(void) {
     return __atomic_load_n(&sArtReady, __ATOMIC_ACQUIRE) ? 0x41525431u : 0;
 }
 
+/* The European pictures decoded last (a decoding sets up the GS memory model of ml_texture_palette, 5 MB, each
+   time: some 10 ms on the Switch, at every move in the main menu, whose sheets carry the PC's item and are made
+   again; 2026-10-29). Up to 512 x 128 each. */
+#define ML_ART_CACHE 32
+static struct { const MlArt *art; uint8_t *rgba; unsigned used; } sArtCache[ML_ART_CACHE];
+static unsigned sArtClock;
+
 int MenuLabels_ArtSwap(unsigned char *rgba, int w, int h) {
     uint64_t hash = UINT64_C(14695981039346656037);
     MlArt key, *hit;
@@ -2461,12 +2468,33 @@ int MenuLabels_ArtSwap(unsigned char *rgba, int w, int h) {
         return 0;
     }
     pthread_mutex_lock(&sArtLock);
+    for (i = 0; i < ML_ART_CACHE && sArtCache[i].art != hit; i++) {
+    }
+    if (i < ML_ART_CACHE) { /* decoded before */
+        sArtCache[i].used = ++sArtClock;
+        memcpy(rgba, sArtCache[i].rgba, hit->top ? (size_t)w * ML_ART_TOP * 4 : bytes); /* (below: the PC's item, kept) */
+        pthread_mutex_unlock(&sArtLock);
+        return 1;
+    }
     t = calloc(1, sizeof(*t));
     memset(&tex, 0, sizeof(tex));
     if (t != NULL && ml_art_decode(t, (MlBuf){sArtFile[hit->file].p, sArtFile[hit->file].n}, hit->index, hit->palette, &tex) > 0 &&
         tex.w == w && tex.h == h) {
+        size_t k, old = 0;
         memcpy(rgba, tex.rgba, hit->top ? (size_t)w * ML_ART_TOP * 4 : bytes); /* (below: the PC's item, kept) */
         done = 1;
+        for (k = 1; k < ML_ART_CACHE; k++) { /* kept, in the place of the one used longest ago */
+            if (sArtCache[k].used < sArtCache[old].used) {
+                old = k;
+            }
+        }
+        free(sArtCache[old].rgba);
+        sArtCache[old].art = NULL;
+        if ((sArtCache[old].rgba = malloc(bytes)) != NULL) {
+            memcpy(sArtCache[old].rgba, tex.rgba, bytes);
+            sArtCache[old].art = hit;
+            sArtCache[old].used = ++sArtClock;
+        }
     }
     if (t != NULL) {
         ml_free(t);

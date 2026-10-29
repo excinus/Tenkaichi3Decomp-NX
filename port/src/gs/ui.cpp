@@ -1272,13 +1272,25 @@ int Ui_Event(const SDL_Event *ev) {
 }
 
 static const char *pad_source_name(int src) {
+#ifdef __SWITCH__
+    // (the Switch's own labels for the same places: SDL names a button by where it is, the Switch's B is "A / Cross")
+    static const char *names[] = {"B", "A", "Y", "X", "-", "HOME", "+", "Left stick click", "Right stick click", "L", "R",
+                                  "D-pad up", "D-pad down", "D-pad left", "D-pad right", "Capture", "Right paddle 1",
+                                  "Left paddle 1", "Right paddle 2", "Left paddle 2", "Touchpad"};
+#else
     static const char *names[] = {"A / Cross", "B / Circle", "X / Square", "Y / Triangle", "Back / Select", "Guide", "Start",
                                   "Left stick click", "Right stick click", "Left shoulder", "Right shoulder", "D-pad up",
                                   "D-pad down", "D-pad left", "D-pad right", "Misc 1", "Right paddle 1", "Left paddle 1",
                                   "Right paddle 2", "Left paddle 2", "Touchpad"};
+#endif
     static char other[24];
+#ifdef __SWITCH__
+    if (src == PORT_PAD_LT) { return "ZL"; }
+    if (src == PORT_PAD_RT) { return "ZR"; }
+#else
     if (src == PORT_PAD_LT) { return "Left trigger"; }
     if (src == PORT_PAD_RT) { return "Right trigger"; }
+#endif
     if (src < 0) { return "-"; }
     if (src < (int)(sizeof(names) / sizeof(names[0]))) { return names[src]; }
     snprintf(other, sizeof(other), "Button %d", src);
@@ -1326,10 +1338,12 @@ static void video_tab(PortVideo &v) {
     ImGui::SetItemTooltip("How the display of a fight, the menus and text are drawn above 1x internal resolution.\n"
                           "Sharp: each of the PlayStation 2's pixels is a block. Smooth: as an emulator shows them.\n"
                           "No difference at 1x.");
+#ifndef __SWITCH__ // (the Switch: always the whole screen)
     bool full = v.fullscreen != 0;
     if (ImGui::Checkbox("Full screen", &full)) { v.fullscreen = full; }
     ImGui::SameLine();
     ImGui::TextDisabled("(F11)");
+#endif
     {
         bool vs = v.vsync != 0, fs = v.frameSkip != 0;
         if (ImGui::Checkbox("V-sync", &vs)) { v.vsync = vs; }
@@ -1349,6 +1363,7 @@ static void video_tab(PortVideo &v) {
                                   "the full one a refresh later. Not used online. Off by default: on a machine that\n"
                                   "cannot keep up it may stutter where the original order would not.");
         }
+#ifndef __SWITCH__ // (the Switch has OpenGL only, which the render thread does not take)
         {
             extern int Port_Setting(const char *name, int def);
             extern void Port_SettingSave(const char *name, int value);
@@ -1362,7 +1377,13 @@ static void video_tab(PortVideo &v) {
                                   "The same picture and the same game. Takes effect when the game is started again.\n"
                                   "Not with the OpenGL renderer, and not on machines with two cores or fewer.");
         }
+#endif
     }
+#ifdef __SWITCH__
+    // (one display, and one renderer: SDL is built for the Switch with OpenGL through Mesa only, no Vulkan)
+    (void)count;
+    ImGui::TextWrapped("Renderer: OpenGL. Active GPU: %s", sGpuName);
+#else
     SDL_DisplayID *displays = SDL_GetDisplays(&count);
     if (v.display > count) { v.display = 0; }
     snprintf(label, sizeof(label), "%s", v.display == 0 ? "Chosen by the desktop" : SDL_GetDisplayName(displays[v.display - 1]));
@@ -1393,6 +1414,7 @@ static void video_tab(PortVideo &v) {
         }
         ImGui::TextWrapped("Active GPU: %s", sGpuName);
     }
+#endif
     {
         // In-between pictures (gs_draw.c): the fight is computed 30 times a second, as on the console; with this
         // on one more picture is drawn between each two. The game itself, its replays and online play are the same.
@@ -1552,6 +1574,9 @@ static void upd_restart(void) {
 static void update_tick(void) {
     if (sUpdCheck < 0) {
         sUpdCheck = Port_Setting("update_check", 1) != 0;
+#ifdef __SWITCH__
+        sUpdCheck = 0; // (not the PC's releases: the Switch's updates are phase 5's, docs/port/switch_plan.md)
+#endif
     }
     if (!sReady) {
         return;
@@ -1727,6 +1752,7 @@ static void update_panel(void) {
 }
 
 static void misc_tab(void) {
+#ifndef __SWITCH__ // (the Switch's updates come with phase 5 of docs/port/switch_plan.md: its own package, not the PC's)
     {
         bool chk = sUpdCheck != 0;
         if (ImGui::Checkbox("Check for updates", &chk)) {
@@ -1740,6 +1766,7 @@ static void misc_tab(void) {
         ImGui::TextDisabled("(installed: %s)", Update_Version()); // (PR #107: the version that is running)
         ImGui::SetItemTooltip("The version of Tenkaichi3Decomp currently running (\"dev\": built locally, never offered updates).");
     }
+#endif
     // the start of the game (PR #50): read by FirstRun_Main, so they count from the next start
     static int sSkipLogos = -1, sSkipIntro = -1, sSkipCopy = -1;
     if (sSkipLogos < 0) {
@@ -1767,6 +1794,7 @@ static void misc_tab(void) {
         Port_SettingsWrite();
     }
     ImGui::SetItemTooltip("The page of legal text shown for five seconds before the title screen, every time.");
+#ifndef __SWITCH__ // (no mouse)
     bool hidePointer = Port_Setting("hide_pointer", 1) != 0;
     if (ImGui::Checkbox("Hide the mouse pointer during play", &hidePointer)) {
         Port_SettingSave("hide_pointer", hidePointer);
@@ -1774,6 +1802,7 @@ static void misc_tab(void) {
     }
     ImGui::SetItemTooltip("The pointer is hidden over the game and shown in this window, the online windows, the\n"
                           "question before the game closes and while a chat line is typed.");
+#endif
     bool quickSave = Port_Setting("save_quick", 1) != 0;
     if (ImGui::Checkbox("Quick saving", &quickSave)) {
         Port_SettingSave("save_quick", quickSave);
@@ -2170,14 +2199,20 @@ static void controls_tab(void) {
     if (ImGui::CollapsingHeader("Sticks, triggers and vibration", ImGuiTreeNodeFlags_DefaultOpen)) {
         sticks_panel(player);
     }
+#ifdef __SWITCH__ // (no keyboard: the controller's column only)
+    const bool keyboard = false;
+    ImGui::TextDisabled("Choose a binding, then press the new button; press nothing for five seconds to keep it.");
+#else
+    const bool keyboard = true;
     ImGui::TextDisabled("Choose a binding, then press the new key or button. Esc keeps it, Delete clears it;");
     ImGui::TextDisabled("with a controller, press nothing for five seconds to keep it.");
+#endif
     // (never lower than a few rows: in a small window the tab scrolls as a whole instead)
-    if (ImGui::BeginTable("bindings", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY | ImGuiTableFlags_BordersInnerV,
+    if (ImGui::BeginTable("bindings", keyboard ? 3 : 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY | ImGuiTableFlags_BordersInnerV,
                           ImVec2(0.0f, ImGui::GetContentRegionAvail().y > U(140.0f) ? ImGui::GetContentRegionAvail().y : U(140.0f)))) {
         ImGui::TableSetupScrollFreeze(0, 1);
         ImGui::TableSetupColumn("Action");
-        ImGui::TableSetupColumn("Keyboard");
+        if (keyboard) { ImGui::TableSetupColumn("Keyboard"); }
         ImGui::TableSetupColumn("Controller");
         ImGui::TableHeadersRow();
         {   // what opens and closes this window (not a player's: one for the program)
@@ -2188,10 +2223,12 @@ static void controls_tab(void) {
             ImGui::TableNextColumn();
             ImGui::AlignTextToFramePadding();
             ImGui::TextUnformatted("Open this window");
-            ImGui::TableNextColumn();
-            snprintf(label, sizeof(label), "%s##k%d", waitKey ? "press a key..." : key > 0 ? SDL_GetScancodeName((SDL_Scancode)key) : "-", a);
-            if (ImGui::Button(label, ImVec2(-FLT_MIN, 0.0f))) {
-                capture(1, player, a);
+            if (keyboard) {
+                ImGui::TableNextColumn();
+                snprintf(label, sizeof(label), "%s##k%d", waitKey ? "press a key..." : key > 0 ? SDL_GetScancodeName((SDL_Scancode)key) : "-", a);
+                if (ImGui::Button(label, ImVec2(-FLT_MIN, 0.0f))) {
+                    capture(1, player, a);
+                }
             }
             ImGui::TableNextColumn();
             snprintf(label, sizeof(label), "%s##p%d", waitPad ? "press a button..." : pad >= 0 ? pad_source_name(pad) : "START + SELECT", a);
@@ -2199,7 +2236,7 @@ static void controls_tab(void) {
                 capture(2, player, a);
             }
         }
-        {   // what opens the online chat (not a player's: one for the program)
+        if (keyboard) {   // what opens the online chat (not a player's: one for the program; a key)
             const int a = PORT_ACTIONS + 1;
             bool waitKey = sCapKind == 1 && sCapAction == a;
             int key = *PortInput_ChatKey();
@@ -2222,10 +2259,12 @@ static void controls_tab(void) {
             ImGui::TableNextColumn();
             ImGui::AlignTextToFramePadding();
             ImGui::TextUnformatted(PortInput_ActionLabel(a));
-            ImGui::TableNextColumn();
-            snprintf(label, sizeof(label), "%s##k%d", waitKey ? "press a key..." : keys[a] > 0 ? SDL_GetScancodeName((SDL_Scancode)keys[a]) : "-", a);
-            if (ImGui::Button(label, ImVec2(-FLT_MIN, 0.0f))) {
-                capture(1, player, a);
+            if (keyboard) {
+                ImGui::TableNextColumn();
+                snprintf(label, sizeof(label), "%s##k%d", waitKey ? "press a key..." : keys[a] > 0 ? SDL_GetScancodeName((SDL_Scancode)keys[a]) : "-", a);
+                if (ImGui::Button(label, ImVec2(-FLT_MIN, 0.0f))) {
+                    capture(1, player, a);
+                }
             }
             ImGui::TableNextColumn();
             if (a < PORT_PAD_BUTTONS) {

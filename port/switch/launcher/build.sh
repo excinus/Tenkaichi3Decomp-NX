@@ -17,6 +17,8 @@ for f in port/switch/launcher/source/main.c port/switch/launcher/source/trampoli
     $CC -O2 -g -Wall -ffunction-sections $ARCH -D__SWITCH__ -I$DEVKITPRO/libnx/include -c "$f" -o $O/$(basename "$f").o || exit 1
 done
 $CC -specs=$DEVKITPRO/libnx/switch.specs $ARCH -o $O/launcher.elf $O/main.c.o $O/trampoline.s.o -L$DEVKITPRO/libnx/lib -lnx || exit 1
-$DEVKITPRO/tools/bin/nacptool --create "Tenkaichi3Decomp" "Tenkaichi3Decomp" "phase 3" $O/launcher.nacp || exit 1
-$DEVKITPRO/tools/bin/elf2nro $O/launcher.elf port/build/switch/Tenkaichi3Decomp.nro --nacp=$O/launcher.nacp || exit 1
+# (the icon: the game's cover, 256 x 256, port/switch/launcher/icon.jpg, as the homebrew menu shows it)
+$DEVKITPRO/tools/bin/nacptool --create "Tenkaichi3Decomp" "Tenkaichi3Decomp" "phase 4" $O/launcher.nacp || exit 1
+$DEVKITPRO/tools/bin/elf2nro $O/launcher.elf port/build/switch/Tenkaichi3Decomp.nro --nacp=$O/launcher.nacp \
+    --icon=port/switch/launcher/icon.jpg || exit 1
 echo "built port/build/switch/Tenkaichi3Decomp.nro"

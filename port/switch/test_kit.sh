@@ -66,6 +66,8 @@ cat > $T/bt3_env.txt <<'ENV'
 #BT3_NOSOUND=1
 # Textures decoded on the game's own thread only, without helper threads: remove the # in front of the next line.
 #BT3_TEX_THREADS=0
+# Where each frame's time goes, in bt3_log.txt (for the tests of phase 4: remove the line to play without it).
+BT3_GS_VERBOSE=1
 ENV
 cat > $K/README.txt <<'TXT'
 Tenkaichi3Decomp for the Nintendo Switch - test kit: the game (phase 4 of docs/port/switch_plan.md)

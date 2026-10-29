@@ -141,6 +141,8 @@ unsigned gsSkipped;
 unsigned gGpuNewTex, gGpuNewTexPixels, gGpuNewPipes; /* created since the front end last cleared them (slow-frame report) */
 unsigned gGpuTexReplaced; /* textures taken from a texture pack so far */
 uint64_t gGpuTexNs, gGpuPipeNs, gGpuEndNs; /* time spent decoding textures, creating pipelines, in GsGpu_FrameEnd */
+/* of gGpuTexNs: the European menu art (MenuLabels_ArtSwap), the checks for battle text, the menus' own text drawn */
+uint64_t gGpuArtNs, gGpuCheckNs, gGpuTextNs;
 /* The same for the picture being drawn only, where it is drawn (the render thread's, or the game's): BT3_DRAW_LOG
    (gs_gpu.c, draw_log). From the start of its list (GsGpu_ListStart). */
 uint64_t gDrawStartNs, gDrawTexNs, gDrawPipeNs, gDrawUpBytes, gDrawImgNs, gDrawLookNs, gDrawVuNs, gDrawXferNs;
@@ -736,11 +738,15 @@ static GsTex texture_get(int ctx) {
         }
     }
     if (px != NULL && !replaced && bits <= 8) {
+        uint64_t a0 = gpu_now();
         MenuLabels_ArtSwap((unsigned char *)px, (int)tw, (int)th); /* the European picture, in the chosen language */
+        gGpuArtNs += gpu_now() - a0;
     }
     if (px != NULL) {
+        uint64_t c0 = gpu_now();
         MenuText_NewTexture(); /* (its label hash is worked out once, for this check and MenuText_Render below) */
         battleText = MenuText_IsBattleTexture((const uint8_t *)px, (int)tw, (int)th, bits <= 8);
+        gGpuCheckNs += gpu_now() - c0;
     }
     if (replaced) {
         free(px);
@@ -759,6 +765,7 @@ static GsTex texture_get(int ctx) {
             rw = (uint32_t)mw; rh = (uint32_t)mh;
             menuText = 1;
         }
+        gGpuTextNs += gpu_now() - font_t0;
         if (getenv("BT3_FONT_LOG") != NULL) { /* what a font setting costs: every decoded texture, and the time the text took */
             fprintf(stderr, "font: frame %u: %ux%u %s %.3f ms\n", gGsFrame, (unsigned)tw, (unsigned)th, text != NULL ? "drawn" : "left",
                     (double)(gpu_now() - font_t0) / 1e6);

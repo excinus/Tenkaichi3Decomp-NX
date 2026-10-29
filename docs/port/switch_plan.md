@@ -6,8 +6,8 @@ record of what was checked; update it as phases land, as docs/port/macos_plan.md
 Status 2026-10-29: phase 4 under way: the Switch's drivers for SDL3 (video with OpenGL through Mesa, sound,
 controllers) are written and the game links with them. On a console it now runs to the main menu, with picture,
 sound and controllers (after a black screen found to be SDL asking libnx's sockets service for the number of
-processors, see "Results"); open: a stutter at each move in the main menu, a crash entering a fight, the intro
-movies flickering black.
+processors, see "Results") and into fights; open: the speed of a fight (6 to 11 pictures a second of 30), a stutter
+at each move in the main menus, the intro movies flickering black.
 Phase 3 done: the game's demo fight ran to its end on a Switch, its fight state identical to the PC's on all 4242
 blanks of fighting (see "Results").
 - Phase 1: `port/switch/spike`, a homebrew program that checks on a console what the port depends on (memory,
@@ -529,3 +529,21 @@ the decoding of the menu's textures on the game's thread (no workers) slower sti
 move (the player's video: the cursor moves, the line of description at the bottom changes a moment later): the trace
 caught the game's thread in `tex_decode_rows` / `Gs_VramRead` there; with the workers back and no trace, to be seen.
 (For online play, phase 6: the sockets service has to be started first.)
+
+The kit of commit c52854b: the game ran to the menus and into fights, without the black screen. The player:
+fights at 6 to 11 pictures a second (30 is the game's), the main menus (title, continue, mode select) stuttering at
+each move, worse than before (the character select smooth), and a crash at the start of one fight
+(`bt3_crash.txt`): a null read in `memcpy` from `vif()` (gs_core.c), its data pointer 0: a DMA tag of the frame's
+list with address 0 (REF / REFS / REFE). On the PS2 that reads the first kilobytes of memory; here address 0 is
+NULL (Port_Ptr). Changed:
+- `walk_chain` leaves such a block out and says so once in the log (with the tag's address, id and size);
+- the European menu art (`MenuLabels_ArtSwap`, the player has the European disc's archives): each swap decoded the
+  picture again, setting up its 5 MB model of GS memory every time; the main menu's sheets carry the PC's item and
+  are made again at each move. The last 32 pictures decoded are kept;
+- the slow-frame line of `BT3_GS_VERBOSE` splits the texture time into the European art, the checks for battle
+  text and the menus' own text; the test kit's `bt3_env.txt` sets `BT3_GS_VERBOSE=1` for these tests: where each
+  frame's time goes (the game's code, the list and its VU1 work, textures, pipelines, the frame's end);
+- the settings window on the Switch: no Full screen, Display, Renderer (Vulkan: not built for the Switch, Mesa's
+  OpenGL only), render thread, mouse pointer, update check (and no check at start: the Switch's updates are phase
+  5's), no keyboard column in Controls, and the buttons by the Switch's names;
+- the launcher's icon (the game's cover, 256 x 256, `port/switch/launcher/icon.jpg`).
