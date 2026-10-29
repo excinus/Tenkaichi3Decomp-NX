@@ -3,8 +3,8 @@
 The Switch port is IN PROGRESS: the game builds for the Switch, but nothing of it runs there yet. This file is the design, the plan and the
 record of what was checked; update it as phases land, as docs/port/macos_plan.md is for the Mac.
 
-Status 2026-10-29: phase 3 under way: the launcher, SDL3 for the Switch and the test kit are built; the demo
-fight on a console is next (the `switch` workflow's artifact `switch-test-kit`, its README.txt).
+Status 2026-10-29: phase 3 done: the game's demo fight ran to its end on a Switch, its fight state identical to
+the PC's on all 4242 blanks of fighting (see "Results"). Phase 4 (picture, sound, controllers) next.
 - Phase 1: `port/switch/spike`, a homebrew program that checks on a console what the port depends on (memory,
   speed, OpenGL), passed everything in three runs on a console (see "Results"): the 4 GB window maps at the fixed
   place every time, code runs at W + 0x20000000, every OpenGL program of the renderer compiles, and the game's
@@ -226,7 +226,7 @@ an `.nro` from the homebrew menu through a game (hold R): the same folder, no HO
 | 0. Design, spike | This file; `port/switch/spike` builds in CI (`switch` workflow, artifact `bt3-switch-spike`). **Done.** |
 | 1. Spike on a console | Its report (`sdmc:/switch/bt3_spike.txt`) is in this file: the window maps, code runs at W + 0x20000000, the speed is known, every GL program compiles. **Done** (2026-10-29): three runs, two at the stock clock, all passed. |
 | 2. The game builds for the Switch | `BT3_CC=nx64` compiles and links the whole game with libnx (`BT3_SKELETON=1`), in CI. **Done** (2026-10-29): `port/build/bt3_nx`; stubs for SDL3 and four system calls. |
-| 3. The demo fight on a console | The launcher loads the game; the attract-demo fight runs without a picture and its `BT3_HASH` lines (written to the card) equal Linux's (`compare_hash.py`). Built (2026-10-29): the launcher, SDL3 for the Switch, the test kit; the run on a console is next. |
+| 3. The demo fight on a console | The launcher loads the game; the attract-demo fight runs without a picture and its `BT3_HASH` lines (written to the card) equal Linux's (`compare_hash.py`). **Done** (2026-10-29): "battle finished", the fight's values the same as the PC's on all 4242 blanks of fighting. |
 | 4. Playable | The platform layer: picture (GL), sound, controllers; the game plays from boot to a fight and saves. |
 | 5. The package | The setup's Switch mode, the NSP from the player's keys, `Tenkaichi3Decomp-switch.zip` in the release workflow, the updater's Switch asset and its restart through the launcher. |
 | 6. Online | A lobby between a Switch and a PC, by code and by address. |
@@ -372,3 +372,27 @@ from the first run:
 - **Shader compiling at stock**: about 0.9 s for all twelve programs, once at start.
 - What this means for the game is measured in phase 3 (its demo fight's time per field on the console). If stock is
   too slow, the hot paths can be made faster with the same results, and an overclock helps in proportion.
+
+### 2026-10-29, phase 3: the demo fight on a console (the same console)
+
+The test kit of commit 6fbe4da (the launcher choosing any free window), started from the homebrew menu through a
+game. (The kit before it stopped at the launcher: the fixed window at 256 GB was taken by one of the system's
+regions in two starts in a row; hence the moving program.) `bt3_log.txt`:
+
+```
+bt3: attract-demo battle
+bt3: battle finished
+```
+
+`bt3_hash.txt` against the same fight on the player's Windows PC (`bt3_hash_pc.txt`, the release installed there):
+
+```
+$ compare_hash.py bt3_hash_pc.txt bt3_hash.txt --fight
+fight values identical for 4242 blanks of fighting
+```
+
+Both runs have 4428 blanks, as the Linux and macOS runs of this fight. The checksum of all of the game's memory
+differs from the first blank, as between any two builds (it holds addresses of the program's functions and
+variables); the fight's own values (both fighters' health and positions, the clock, the random generator) are the
+same at every blank. So the Switch computes the game exactly as the PC does: the memory window, the moved program,
+the software float on the console's processor, the data tables fetched from the player's disc.
