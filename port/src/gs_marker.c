@@ -96,7 +96,7 @@ void Port_MenuPage(int screen) {
        the Data Center's password, 44: its keyboard is one picture as wide as the 4:3 screen, its letters on it) */
     /* (the character selects of Ultimate Battle and the World Tournament, 15, 19, 23, 24, 25, as character select) */
     Port_MenuPart(screen == 0 ? PORT_MENU_NONE : screen == 2 ? PORT_MENU_LEFT
-                  : screen == 3 || screen == 37 || screen == 44 || screen == 15 || screen == 19 || (screen >= 23 && screen <= 25) ? PORT_MENU_CENTER_ALL
+                  : screen == 3 || screen == 37 || screen == 44 ? PORT_MENU_CENTER_ALL
                                                 : screen == 13 ? PORT_MENU_FILL : screen == 38 ? PORT_MENU_PAGE_TOP
                                                 : screen == 17 || screen == 20 ? PORT_MENU_PAGE_EDGE
                                                 : screen >= 10 ? PORT_MENU_PAGE : PORT_MENU_CENTER);
@@ -216,6 +216,27 @@ static int clip_part(const char *name, int x, int top) {
     }
     if (sMenuScreen == 17 && top && strcmp(name, "mc_single_chara_l") == 0) {
         return PORT_MENU_LEFT; /* (and the character's picture there, on the left) */
+    }
+    if (sMenuScreen == 18 && top && starts(name, "mc_menu_plate_")) {
+        return PORT_MENU_RIGHT; /* (Training: its plates run off the right edge) */
+    }
+    if (sMenuScreen == 20 && top && strcmp(name, "mc_world_chirashi") == 0) {
+        return PORT_MENU_CENTER; /* (World Tour: the announcer's poster, one picture) */
+    }
+    if (sMenuScreen == 13 && top && (starts(name, "mc_menu_plate_") || starts(name, "mc_level_plate_") || starts(name, "mc_scenario"))) {
+        return PORT_MENU_CENTER; /* (Dragon History: its plates at their true shape, over the scenery that fills) */
+    }
+    if ((sMenuScreen == 15 || sMenuScreen == 19 || (sMenuScreen >= 23 && sMenuScreen <= 25)) && top) {
+        /* (the character selects of Ultimate Battle and the World Tournament: the player's name plate, picture side
+           and their text against the left edge as in the versus one; the roster with its cells in the middle) */
+        size_t n = strlen(name);
+        if (n > 2 && name[n - 2] == '_' && name[n - 1] == 'l' && !starts(name, "mc_single_chara_")) {
+            return PORT_MENU_LEFT;
+        }
+        if (starts(name, "mc_chara_chip_") || strcmp(name, "mc_plate") == 0 || starts(name, "mc_yajirusi_") || starts(name, "mc_custom_") ||
+            starts(name, "mc_item_") || starts(name, "mc_icon_item_")) {
+            return PORT_MENU_CENTER_ALL;
+        }
     }
     if (sMenuScreen == 38 && top && starts(name, "menu_plate_")) {
         return PORT_MENU_LEFT; /* (the item shop: its two plates slide in from the left, as Evolution Z's) */

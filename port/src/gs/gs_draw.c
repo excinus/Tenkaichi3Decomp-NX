@@ -1655,7 +1655,9 @@ void GsGpu_Draw(int type, int ctx, const GsVertex *v) {
                the middle, the left edge or the right edge, the long bars too (some of a bar's pieces are wider than
                480, some not: they have to stay together). What fills the width is marked 10 and not narrowed. */
             pivot = gsAnchor == 11 || gsAnchor == 14 ? 0.0f : gsAnchor == 12 || gsAnchor == 15 ? 512.0f : 256.0f;
-            if (((gsAnchor == 16 || gsAnchor == 17 || gsAnchor == 18) && y0 <= 8.0f && x0 >= 256.0f && x1 >= 511.5f) ||
+            int corner = gsAnchor == 16 || gsAnchor == 17 || gsAnchor == 18 || (gsAnchor == 13 && x1 - x0 <= 160.0f && y1 <= 140.0f);
+            /* (13, character select: only a sprite the size of a corner's cloud, not the big pictures from the top) */
+            if ((corner && y0 <= 8.0f && x0 >= 256.0f && x1 >= 511.5f) ||
                 (gsAnchor == 17 && y1 <= 120.0f && x0 >= 256.0f)) {
                 pivot = 512.0f; /* (a page's piece from the top edge, in the right half against the edge: the corner's clouds;
                                    17: any in the top 120 lines starting in the right half, the shop's counters with their
@@ -1664,7 +1666,7 @@ void GsGpu_Draw(int type, int ctx, const GsVertex *v) {
                 pivot = 512.0f; /* (18: a page's piece cut off at the right edge: a frame whose art is cut there) */
             } else if (gsAnchor == 18 && x0 <= 0.5f && x1 <= 312.0f) {
                 pivot = 0.0f;
-            } else if ((gsAnchor == 16 || gsAnchor == 17 || gsAnchor == 18) && y0 <= 8.0f && x1 <= 256.0f && x0 <= 0.5f) {
+            } else if (corner && y0 <= 8.0f && x1 <= 256.0f && x0 <= 0.5f) {
                 pivot = 0.0f;
             }
             if (gsAnchor == 11 && x0 >= 256.0f && x1 >= 511.5f) {

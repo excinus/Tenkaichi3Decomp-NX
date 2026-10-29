@@ -4501,6 +4501,13 @@ converted for it has its 2D at its true shape across the whole width, the way th
   screen too (`PORT_MENU_LEFT_ALL` / `_RIGHT_ALL`): a plate's sprite sliding in or out is that wide for a frame,
   and was taken for scenery and stretched: the plates jumped towards the middle for a frame on entering and
   leaving. The main menu keeps its look (its selected plate's streak fills the width).
+- More per screen (the user's): Training's plates (`mc_menu_plate_*`, 18) against the right edge; World Tour's
+  announcer poster (`mc_world_chirashi`) one picture in the middle (it was split by the right-edge rule); Dragon
+  History's plates at their true shape over its filling scenery; the character selects of Ultimate Battle and the
+  World Tournament (15, 19, 23..25) as one page whose full-width pieces fill (its message window), the player's
+  `*_l` plates and text against the left edge, the roster, its cells and the item windows at their true shape in
+  the middle; character select's gold corner clouds (sprites up to 160 wide and 140 high from the top edge, not
+  the big pictures) against their corner.
 - Known: Character Reference's shelves are pieces of the page like its window, so they stay in the middle and meet
   the backdrop at the 4:3 page's edges.
 - Test aids: `BT3_MENU_MODE=<n>` starts the menus at progress mode n (6 Dragon History, 13 Ultimate Battle, 33 World
