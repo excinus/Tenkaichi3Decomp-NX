@@ -413,7 +413,13 @@ void Port_Trace(unsigned vblanks) {
                     }
 #if !defined(_WIN32) && !defined(__APPLE__) /* the linker symbols of an ELF program */
                     {   /* the game's global variables too: [__data_start, _end), base address first */
+#ifdef __SWITCH__ /* (libnx's linker script names the end __end__; the low 4 bytes of an address in the window are the
+                    game address, as on Linux the whole of it) */
+                        extern char __data_start[], __end__[];
+                        char *const _end = __end__;
+#else
                         extern char __data_start[], _end[];
+#endif
                         uint32_t base = (uint32_t)(uintptr_t)__data_start;
 
                         snprintf(name, sizeof(name), "port/build/glob_%u.bin", now);

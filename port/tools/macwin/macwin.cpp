@@ -1,4 +1,4 @@
-// The game's memory model on macOS / arm64, as an LLVM pass (opt -load-pass-plugin macwin.dylib -passes=bt3-window).
+// The game's memory model on macOS / arm64 (and the Switch, see -bt3-window-base), as an LLVM pass (opt -load-pass-plugin macwin.dylib -passes=bt3-window).
 //
 // The game's pointers are 4 bytes wide (port/tools/ptr32.py: `__ptr32 __uptr`, address space 271). On Linux and
 // Windows they are plain addresses below 4 GB. macOS keeps the low 4 GB of every arm64 process unmapped, so here a
@@ -74,6 +74,10 @@ cl::opt<bool> PortModule("bt3-port", cl::desc("a port source, not the game's"), 
 // likewise, and the call is a fixed-argument one when the definition is.
 cl::opt<std::string> Defs("bt3-defs", cl::desc("write this module's function definitions to FILE, change nothing"), cl::init(""));
 cl::opt<std::string> Sigs("bt3-sigs", cl::desc("the program's function definitions (FILE from -bt3-defs)"), cl::init(""));
+// The Switch build (BT3_CC=nx64, docs/port/switch_plan.md): the window is at a fixed address and the program is linked
+// at it + 0x20000000 (not position-independent), so W in constant data is that number, not _mh_execute_header's
+// place. A 4-byte pointer in data is then `.word g - W`, which GNU ld resolves. Code still loads Port_Window.
+cl::opt<uint64_t> WindowBase("bt3-window-base", cl::desc("W as a fixed address (ELF; default: from _mh_execute_header)"), cl::init(0));
 
 constexpr unsigned GAME = 271; // __ptr32 __uptr: the game's 4-byte pointers
 constexpr unsigned HOST64 = 272; // __ptr64: ordinary 64-bit pointers (ptr32.py uses them for variadic arguments)
@@ -95,6 +99,9 @@ struct Window {
           Host(PointerType::get(Ctx, 0)), Game(PointerType::get(Ctx, GAME)) {}
 
     Constant *window() {
+        if (!W && WindowBase != 0) {
+            W = ConstantExpr::getIntToPtr(ConstantInt::get(I64, WindowBase), Host);
+        }
         if (!W) {
             GlobalVariable *mh = M.getGlobalVariable("_mh_execute_header");
             if (!mh) {

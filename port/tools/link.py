@@ -6,7 +6,7 @@ import os, pathlib, re, subprocess
 
 import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from toolchain import ROOT, VARIANT, WIN, MAC, PREFIX, OBJ, DATA, EXE, sdl3
+from toolchain import ROOT, VARIANT, WIN, MAC, NX, NX_WINDOW, NX_ARCH, DEVKITPRO, PREFIX, OBJ, DATA, EXE, sdl3, dkp
 
 B = ROOT / "port/build"
 
@@ -47,9 +47,29 @@ def link_mac(objs, extra):
     moved = [f"-Wl,-segaddr,{s},{MAC_BASE + a - first:#x}" for s, a, _ in segs if s != "__LINKEDIT"]
     return subprocess.run(cmd + moved, capture_output=True, text=True)
 
+def link_nx(objs, extra):
+    """The Switch: devkitA64's linker with libnx, NOT position-independent (port/switch/nx.specs: libnx's own specs
+    without -pie), the program at the window + 0x20000000 (__start__, where libnx's linker script begins). The
+    game's main() wrapped as on Linux (plat_mem.c); --wrap=Progress_Main and --defsym are done by macwin.py, as on
+    macOS. The result is an ELF that the launcher loads at that address (docs/port/switch_plan.md)."""
+    dyn = B / "obj_nx64_dynamic.o"
+    r = subprocess.run([dkp("gcc")] + NX_ARCH + ["-c", str(ROOT / "port/switch/nx_dynamic.s"), "-o", str(dyn)], capture_output=True, text=True)
+    if r.returncode:
+        return r
+    env = dict(os.environ, DEVKITPRO=str(DEVKITPRO))
+    # (gcc, not g++: the stubs are C; the C++ library for the settings window is named)
+    cmd = [dkp("gcc"), f"-specs={ROOT / 'port/switch/nx.specs'}"] + NX_ARCH + ["-w", "-o", str(EXE)] + extra + objs + [str(dyn)] + \
+          [f"-L{DEVKITPRO}/portlibs/switch/lib", f"-L{DEVKITPRO}/libnx/lib", "-lstdc++", "-lnx", "-lm",
+           f"-Wl,--defsym=__start__={NX_WINDOW + 0x20000000:#x}", "-Wl,--wrap=main", f"-Wl,-Map={EXE}.map"]
+    argsfile = B / "link_nx64.rsp"
+    argsfile.write_text("\n".join('"' + a + '"' for a in cmd[1:]))
+    return subprocess.run([cmd[0], "@" + str(argsfile)], capture_output=True, text=True, env=env)
+
 def link(objs, extra):
     if MAC:
         return link_mac(objs, extra)
+    if NX:
+        return link_nx(objs, extra)
     common = ["-Wl,--defsym=D_3BE71C=0x3BE71C", "-Wl,--wrap=Progress_Main", f"-Wl,-Map={EXE}.map"]
     if WIN:
         # Windows: the program at a fixed address below 4 GB (no relocation: the game's 4-byte pointers and the

@@ -668,6 +668,21 @@ static GL3WglProc get_proc(const char *proc)
         res = (GL3WglProc)GetProcAddress(libgl, proc);
     return res;
 }
+#elif defined(__SWITCH__)
+// Tenkaichi3Decomp: the Nintendo Switch (docs/port/switch_plan.md). No shared libraries there: devkitPro's Mesa is
+// linked into the program, and EGL hands out the entry points. (Declared here: EGL's header brings Khronos' types,
+// which this file defines its own way.)
+#ifdef __cplusplus
+extern "C"
+#endif
+void (*eglGetProcAddress(const char *procname))(void);
+
+static int open_libgl(void) { return GL3W_OK; }
+static void close_libgl(void) {}
+static GL3WglProc get_proc(const char *proc)
+{
+    return (GL3WglProc)eglGetProcAddress(proc);
+}
 #elif defined(__APPLE__)
 #include <dlfcn.h>
 

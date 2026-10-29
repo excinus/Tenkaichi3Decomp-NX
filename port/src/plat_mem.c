@@ -26,7 +26,7 @@ static uint32_t sHeapNext = HEAP_FIRST, sHeapEnd = HEAP_END;
 
 /* The 64-bit builds (the game's pointers 4 bytes wide, ptr32.py) keep the port's blocks for the game in a region of
    their own (Port_LowAlloc); the 32-bit build uses the C library's. */
-#if defined(__x86_64__) || defined(__APPLE__)
+#if defined(__x86_64__) || defined(__APPLE__) || defined(__SWITCH__)
 #define PORT_LOW_REGION 1
 #else
 #define PORT_LOW_REGION 0
@@ -273,6 +273,83 @@ int __wrap_main(int argc, char **argv) {
     return sResult;
 }
 
+#elif defined(__SWITCH__)
+/* ------------------------------------------------------------------------------------------- Nintendo Switch
+   The macOS model (above) on Horizon (docs/port/switch_plan.md): the window is at the fixed PORT_WINDOW
+   (port_addr.h), the launcher loaded this program at window + 0x20000000 and left the rest of the window free.
+     - Horizon has no mmap at a chosen address: a region is memory from the C library's heap, mapped at its place
+       with svcMapProcessCodeMemory and made read-write with svcSetProcessMemoryPermission (what homebrew loaders do
+       to place a program; checked on consoles by port/switch/spike). The calls are allowed to this program by the
+       launcher's NPDM, and the launcher hands over the process handle (libnx: envGetOwnProcessHandle);
+     - no pages taken as first used: a region is backed in full when it is mapped (the low arena's 192 MB too;
+       the console gives an application about 3.2 GB);
+     - pages are 4 KB; the memory is cleared, as mmap's is;
+     - the game's main() runs on a stack in the window, on the main thread, as on macOS. */
+#include <malloc.h> /* memalign */
+#include <unistd.h> /* chdir */
+#include <switch.h>
+
+/* The window's base for the game's code (port/tools/macwin/macwin.cpp loads it in every function). */
+void *Port_Window = (void *)PORT_WINDOW;
+
+static void *map_at(uint32_t addr, uint32_t size) {
+    uint64_t at = (PORT_WINDOW + addr) & ~(uint64_t)0xFFF, n = ((PORT_WINDOW + addr + size + 0xFFF) & ~(uint64_t)0xFFF) - at;
+    Handle self = envGetOwnProcessHandle();
+    void *src = memalign(0x1000, n);
+
+    if (src == NULL) {
+        return NULL;
+    }
+    if (R_FAILED(svcMapProcessCodeMemory(self, at, (uint64_t)(uintptr_t)src, n))) {
+        free(src);
+        return NULL;
+    }
+    if (R_FAILED(svcSetProcessMemoryPermission(self, at, n, Perm_Rw))) {
+        if (R_SUCCEEDED(svcUnmapProcessCodeMemory(self, at, (uint64_t)(uintptr_t)src, n))) {
+            free(src);
+        }
+        return NULL;
+    }
+    memset((void *)(uintptr_t)at, 0, n); /* (the heap's memory is not cleared; the game expects mmap's zeros) */
+    return (void *)(uintptr_t)at;
+}
+
+static void map(uint32_t addr, uint32_t size, const char *what) {
+    if (map_at(addr, size) == NULL) {
+        fprintf(stderr, "bt3: cannot map %s at window + 0x%08X\n", what, addr);
+        exit(2);
+    }
+}
+
+static void map_heap(void) {
+    map(HEAP_BASE, HEAP_END - HEAP_BASE, "the game heap");
+}
+
+#define STACK_BASE 0x02000000u
+#define STACK_SIZE 0x01000000u
+extern int __real_main(int argc, char **argv);
+extern void Port_CallOnStack(void (*fn)(void), void *top);
+PORT_HOST static int sArgc = 0, sResult = 0; /* (the process's own arguments, not game state) */
+PORT_HOST static char **sArgv = NULL;
+
+/* fn() with the stack pointer at `top` (as on macOS; ELF names) */
+__asm__(".text\n.globl Port_CallOnStack\n.type Port_CallOnStack, %function\n.p2align 2\nPort_CallOnStack:\n"
+        "    stp x29, x30, [sp, #-16]!\n    mov x29, sp\n    mov sp, x1\n    blr x0\n"
+        "    mov sp, x29\n    ldp x29, x30, [sp], #16\n    ret\n");
+
+static void game_main(void) {
+    sResult = __real_main(sArgc, sArgv);
+}
+
+int __wrap_main(int argc, char **argv) {
+    sArgc = argc;
+    sArgv = argv;
+    sGameStackTop = (uint8_t *)Port_Ptr(STACK_BASE + STACK_SIZE);
+    gPortStage = "the game is running (on its stack in the window)";
+    Port_CallOnStack(game_main, sGameStackTop);
+    return sResult;
+}
+
 #else
 /* -------------------------------------------------------------------------------------------------------- Linux */
 #include <sys/mman.h>
@@ -395,6 +472,11 @@ static void Port_LoadGameData(void) {
 #elif defined(__APPLE__)
     uint32_t exeSize = sizeof(exe) - 1;
     long n = _NSGetExecutablePath(exe, &exeSize) == 0 ? (long)strlen(exe) : -1;
+#elif defined(__SWITCH__)
+    /* the path the launcher started it with (sdmc:/atmosphere/contents/<title>/Tenkaichi3Decomp) */
+    extern int __system_argc;
+    extern char **__system_argv;
+    long n = __system_argc > 0 && __system_argv[0] != NULL ? (long)snprintf(exe, sizeof(exe), "%s", __system_argv[0]) : -1;
 #else
     long n = (long)readlink("/proc/self/exe", exe, sizeof(exe) - 1);
 #endif
@@ -611,7 +693,7 @@ __attribute__((constructor)) static void Port_MapMemory(void) {
     gPortStage = "reading the game's programs from gamedata";
     Port_LoadGameData();
     gPortStage = "reserving the game's memory";
-#if defined(__APPLE__)
+#if defined(__APPLE__) || defined(__SWITCH__)
     map(STACK_BASE, STACK_SIZE, "the game thread's stack");
     low_region_take(); /* the region of Port_LowAlloc, now (see there) */
 #elif defined(__x86_64__) && !defined(_WIN32)
@@ -661,8 +743,8 @@ static void low_region_take(void) {
             exit(2);
         }
         sLowCommitted = sLowArena;
-#elif defined(__APPLE__)
-        sLowArena = map_at(LOW_ARENA_BASE, LOW_ARENA_SIZE); /* (pages are only taken as they are first used) */
+#elif defined(__APPLE__) || defined(__SWITCH__)
+        sLowArena = map_at(LOW_ARENA_BASE, LOW_ARENA_SIZE); /* (macOS: pages are only taken as they are first used) */
         if (sLowArena == NULL) {
             fprintf(stderr, "bt3: the window has no room for the port's own blocks\n");
             exit(2);

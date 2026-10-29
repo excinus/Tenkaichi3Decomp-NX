@@ -1,26 +1,19 @@
-# Builds the Nintendo Switch spike (port/switch/spike; docs/port/switch_plan.md, phase 1) in devkitPro's container:
-# a homebrew program that checks, on a console, what the Switch port depends on (the memory window, the speed of
-# the game's software float, the OpenGL renderer's shaders on the console's Mesa). It does not contain the game.
-# spike.nro is kept as an artifact of the run, for testers to copy to sdmc:/switch/.
+# The Nintendo Switch build (docs/port/switch_plan.md), in devkitPro's container, from the repository alone:
+#
+#   spike   port/switch/spike: a homebrew program that checks, on a console, what the port depends on (the memory
+#           window, the speed of the game's software float, the OpenGL renderer's shaders on the console's Mesa).
+#           spike.nro is kept as an artifact, for testers to copy to sdmc:/switch/.
+#   game    the game itself for the Switch (BT3_CC=nx64): compiled and linked with libnx. As the release builds, no
+#           disc and no game data are involved (BT3_SKELETON=1: the data tables are built blank and the program
+#           fetches their values from the player's disc at start). It does not run yet: the launcher and the
+#           platform layer are the next phases; what the Switch does not have yet is listed in stubs.txt.
 name: switch
 
 on:
   push:
-    paths:
-      - "port/switch/**"
-      - "port/src/softfloat_ps2.c"
-      - "port/src/softfloat_ps2_inl.h"
-      - "port/src/gs/shaders/**"
-      - "include/port/vu0_a.h"
-      - ".github/workflows/switch.yml"
+    paths-ignore: ["docs/**", "**.md", "LICENSE", "LICENSE-MIT"]
   pull_request:
-    paths:
-      - "port/switch/**"
-      - "port/src/softfloat_ps2.c"
-      - "port/src/softfloat_ps2_inl.h"
-      - "port/src/gs/shaders/**"
-      - "include/port/vu0_a.h"
-      - ".github/workflows/switch.yml"
+    paths-ignore: ["docs/**", "**.md", "LICENSE", "LICENSE-MIT"]
   workflow_dispatch:
 
 permissions:
@@ -45,3 +38,55 @@ jobs:
           path: port/build/switch/spike.nro
           if-no-files-found: error
           retention-days: 30
+
+  game:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    container: devkitpro/devkita64:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # LLVM 22 (the version ptr32.py, irfix.py and the window pass are written against) with its Python bindings,
+      # as in port/release/Dockerfile; toolchain.py finds it in /usr/lib/llvm-22/bin
+      - name: Tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends curl ca-certificates gnupg python3
+          curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key | gpg --dearmor -o /usr/share/keyrings/llvm.gpg
+          echo "deb [signed-by=/usr/share/keyrings/llvm.gpg] http://apt.llvm.org/bookworm/ llvm-toolchain-bookworm-22 main" > /etc/apt/sources.list.d/llvm.list
+          apt-get update
+          apt-get install -y --no-install-recommends clang-22 llvm-22 llvm-22-dev libclang-22-dev python3-clang-22
+          /usr/lib/llvm-22/bin/clang --version | head -1
+          sh port/switch/sdl3_headers.sh
+
+      - name: Build
+        env:
+          BT3_CC: nx64
+          BT3_SKELETON: "1"
+        run: |
+          mkdir -p port/build
+          python3 port/tools/undefined.py > port/build/compile_nx64.txt 2>&1 || { tail -40 port/build/compile_nx64.txt; exit 1; }
+          tail -5 port/build/compile_nx64.txt
+          if grep -q "^FAILED" port/build/compile_nx64.txt; then grep -A12 "^FAILED" port/build/compile_nx64.txt | head -80; exit 1; fi
+          python3 port/tools/link.py 2>&1 | tee port/build/link_nx64.txt
+          test -f port/build/bt3_nx
+          echo "functions the Switch does not have yet (stubs): $(wc -l < port/build/stubs.txt)"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: switch-build-logs
+          path: |
+            port/build/*_nx64.txt
+            port/build/stubs.txt
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bt3_nx
+          path: |
+            port/build/bt3_nx
+            port/build/bt3_nx.dat
+            port/build/bt3_nx.mem
+            port/build/bt3_nx.map
+          if-no-files-found: error
+          retention-days: 14

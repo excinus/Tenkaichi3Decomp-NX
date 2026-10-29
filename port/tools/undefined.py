@@ -8,7 +8,7 @@ import buildkey
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 # The build variants (BT3_CC): see toolchain.py.
-from toolchain import VARIANT, WIN, MAC, BITS64, PREFIX, CLANG_TARGET, OBJ, DATA, sdl3, llvm
+from toolchain import VARIANT, WIN, MAC, NX, WINDOW, BITS64, PREFIX, CLANG_TARGET, OBJ, DATA, DEVKITPRO, NX_ARCH, sdl3, llvm, dkp
 
 # macOS / arm64: x86 code-generation flags have no meaning there. Software float is not a front-end option on arm64:
 # the IR is made as usual and the code generator is told there is no floating-point unit (llc -mattr, below), which
@@ -20,9 +20,22 @@ MAC_FLAGS = ["-fno-vectorize", "-fno-slp-vectorize", "-Wno-error=return-mismatch
 MAC_IR = ["-Xclang", "-disable-llvm-passes"]  # the window pass sees the code as written ((u32)p is still a ptrtoint and a
 # trunc, not folded into a shift or a mask); macwin.run optimises after it
 MAC_LLC = ["-mtriple=arm64-apple-macos11", "-mattr=-fp-armv8,-neon", "-relocation-model=pic"]
+# The Switch: the same, as ELF for libnx; the program is linked at a fixed address (link.py), so no PIC
+NX_LLC = ["-mtriple=aarch64-none-elf", "-mcpu=cortex-a57", "-mattr=-fp-armv8,-neon", "-relocation-model=static"]
+
+def nx_host(cmd):
+    """The Switch build's ordinary (hardware float) code: the renderer, the settings window, the port's few such files,
+    with devkitA64 and libnx as homebrew is built; SDL3's headers (toolchain.sdl3)."""
+    sdl = [f"-I{sdl3() / 'include'}"] if sdl3() else []
+    inc = ["-D__SWITCH__", f"-I{DEVKITPRO}/libnx/include", f"-I{DEVKITPRO}/portlibs/switch/include"] + sdl
+    return [dkp("g++" if cmd[0] == "g++" else "gcc")] + NX_ARCH + [a for a in cmd[1:] if a not in MAC_DROP] + inc
 
 def variant(cmd):
     """The command for this build variant: clang for everything built with software float, 64-bit or Windows flags."""
+    if NX:
+        if "-msoft-float" not in cmd:
+            return nx_host(cmd)
+        return [llvm("clang++" if cmd[0] == "g++" else "clang")] + CLANG_TARGET + [a for a in cmd[1:] if a not in MAC_DROP] + ["-fms-extensions"] + MAC_FLAGS
     if MAC:
         soft = "-msoft-float" in cmd
         cc = llvm("clang++" if cmd[0] == "g++" else "clang") if soft else ("clang++" if cmd[0] == "g++" else "clang")
@@ -43,7 +56,7 @@ def variant(cmd):
     return ["clang"] + CLANG_TARGET + cmd[1:] + ["-mno-x87", "-Wno-error=return-mismatch"] + extra
 
 def run(cmd, **kw):
-    if MAC and "-msoft-float" in cmd:  # software float on arm64 is a code-generator option: through IR and llc
+    if WINDOW and "-msoft-float" in cmd:  # software float on arm64 is a code-generator option: through IR and llc
         return mac_soft(variant(cmd), **kw)
     return subprocess.run(variant(cmd), **kw)
 
@@ -71,7 +84,10 @@ def mac_finish(item):
     ll, o, port = item
     r = macwin.run(pathlib.Path(ll), port=port)
     if r.returncode == 0:
-        r = subprocess.run([llvm("llc"), "-O2", "-filetype=obj"] + MAC_LLC + [ll, "-o", o], cwd=ROOT, capture_output=True, text=True)
+        r = subprocess.run([llvm("llc"), "-O2", "-filetype=obj"] + (NX_LLC if NX else MAC_LLC) + [ll, "-o", o], cwd=ROOT, capture_output=True, text=True)
+    if r.returncode == 0 and NX and not port:  # the game's names that the Switch's C library has too (macho.NX_RENAME)
+        from macho import NX_RENAME
+        r = subprocess.run([llvm("llvm-objcopy")] + [f"--redefine-sym={k}={v}" for k, v in NX_RENAME.items()] + [o], capture_output=True, text=True)
     return o, r.returncode, r.stderr
 
 CC = ["gcc", "-m32", "-std=gnu89", "-c", "-O2", "-g", "-fno-strict-aliasing", "-ffp-contract=off", "-fcommon", "-w", "-fno-pic", "-fno-stack-protector", "-fno-builtin", "-msoft-float", "-mno-sse", "-mno-mmx", "-malign-double", "-include", "port_libm.h",
@@ -87,17 +103,17 @@ def compile_ee(cmd, src, o):
         return r
     i = pathlib.Path(str(o)[:-2] + ".i")
     i.write_text(eeconst.transform(r.stdout))
-    if BITS64 and (cmd[0] == "clang" or MAC) and not o.name.startswith("nl_"):  # the game's pointers: 4 bytes (not the maths library: no game text)
+    if BITS64 and (cmd[0] == "clang" or WINDOW) and not o.name.startswith("nl_"):  # the game's pointers: 4 bytes (not the maths library: no game text)
         import ptr32
         std = next((a for a in cmd if a.startswith("-std=")), "-std=gnu89")
         try:
             text = ptr32.transform(str(i), ["-x", "cpp-output"] + (CLANG_TARGET or ["-m64"]) + [std, "-fms-extensions", "-w", "-Wno-error=return-mismatch"] +
                                    (["-mno-ms-bitfields"] if WIN else []) +
-                                   (["-Wno-error=return-type"] if MAC else []))  # (pip's libclang 18: the older name of return-mismatch)
+                                   (["-Wno-error=return-type"] if WINDOW else []))  # (pip's libclang 18: the older name of return-mismatch)
         except RuntimeError as e:
             return subprocess.CompletedProcess(cmd, 1, "", f"ptr32: {e}\n")
         i.write_text(text, encoding="latin-1")
-    if cmd[0] == "clang" or MAC:  # no -fpreprocessed: the input is named as preprocessed, and the forced includes are dropped
+    if cmd[0] == "clang" or WINDOW:  # no -fpreprocessed: the input is named as preprocessed, and the forced includes are dropped
         c2, skip = [], False
         for a in cmd:
             if skip:
@@ -106,7 +122,7 @@ def compile_ee(cmd, src, o):
                 skip = True
             else:
                 c2.append(a)
-        if MAC:  # through LLVM IR: the game's addresses become offsets in the window (macwin), then arm64 code, no FPU
+        if WINDOW:  # through LLVM IR: the game's addresses become offsets in the window (macwin), then arm64 code, no FPU
             ll = pathlib.Path(str(o)[:-2] + ".ll")
             r = subprocess.run(c2 + ["-S", "-emit-llvm"] + MAC_IR + ["-x", "cpp-output", str(i), "-o", str(ll)], cwd=ROOT, capture_output=True, text=True)
             return r if r.returncode else mac_pending(ll, o, o.name.startswith(("pc_", "nl_")))
@@ -134,6 +150,8 @@ def main():
     OBJ.mkdir(parents=True, exist_ok=True)
     key = buildkey.flags()  # (first: a key that cannot be used stops the build before anything is compiled)
     fs = portsrc.sources()
+    if WINDOW:  # the window pass's plugin, built here once before the workers below all need it (macwin.py)
+        __import__("macwin").plugin()
     with concurrent.futures.ProcessPoolExecutor(16) as ex:
         res = list(ex.map(cc, fs))
     pending = [p for _, _, _, p in res if p]  # (the macOS build: files waiting for mac_finish)
@@ -155,10 +173,10 @@ def main():
         if blank:
             (DATA / "SKELETON").write_text("built from port/data: finish with make_dat.py\n")
         for f in (sorted((ROOT / "port/data").glob("*.s")) if blank else real):
-            if MAC:  # Mach-O names and window offsets for the tables' pointers (macho.py)
+            if WINDOW:  # window offsets for the tables' pointers (macho.py; Mach-O names on macOS)
                 import macho
                 m = DATA / f.name
-                m.write_text(macho.asm(f.read_text()))
+                m.write_text(macho.asm(f.read_text()) if MAC else macho.elf_asm(f.read_text()))
                 r = subprocess.run([llvm("clang")] + CLANG_TARGET + ["-c", "-x", "assembler", str(m), "-o", str(DATA / (f.name[:-2] + ".o"))],
                                    cwd=ROOT, capture_output=True, text=True)
             else:
@@ -212,6 +230,9 @@ def main():
         stage = src.suffix[1:]
         name = "k" + src.stem.capitalize() + stage.capitalize() + "Spv"
         spv = gen / (src.name + ".spv")
+        if NX:  # the Switch draws through OpenGL only (gs_gl.c, the GLSL below): SDL_GPU and its SPIR-V are not there
+            arrays.append(f"static const unsigned char {name}[] = {{0, 0, 0, 0}};\n")
+            continue
         if shutil.which("glslc") is None and spv.exists() and spv.stat().st_mtime >= src.stat().st_mtime:
             pass  # no shader compiler here (the release container): the compiled shader that was put in place is current
         else:
@@ -298,7 +319,7 @@ def main():
     # Native Windows has a 32767-character CreateProcess limit; absolute object paths exceed it.
     argsfile = ROOT / "port/build/nm-objects.rsp"
     argsfile.write_text("\n".join('"' + p.replace('\\', '/') + '"' for p in objs))
-    out = subprocess.run([llvm("llvm-nm") if MAC else PREFIX + "nm", "-A", "@" + str(argsfile)], capture_output=True, text=True, check=True).stdout
+    out = subprocess.run([llvm("llvm-nm") if WINDOW else PREFIX + "nm", "-A", "@" + str(argsfile)], capture_output=True, text=True, check=True).stdout
     for l in out.splitlines():
         m = re.match(r"\S+:\s*([0-9a-f]*)\s+(\w)\s+(\S+)$", l)
         if not m:

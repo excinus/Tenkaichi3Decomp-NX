@@ -1,13 +1,18 @@
 # Nintendo Switch (Atmosphère) port: plan
 
-The Switch port is PLANNED: nothing of the game runs on a Switch yet. This file is the design, the plan and the
+The Switch port is IN PROGRESS: the game builds for the Switch, but nothing of it runs there yet. This file is the design, the plan and the
 record of what was checked; update it as phases land, as docs/port/macos_plan.md is for the Mac.
 
-Status 2026-10-29: phase 1 done, phase 2 next. `port/switch/spike`, a homebrew program that checks on a console
-what the port depends on (memory, speed, OpenGL), built by `.github/workflows/switch.yml`, passed everything in
-three runs on a console (see "Results"): the 4 GB window maps at the fixed place every time, code runs at
-W + 0x20000000, every OpenGL program of the renderer compiles, and the game's software float is 3.4 to 4.2 times
-slower than on the build machine's Xeon at the stock 1020 MHz (about 2.2 times at 1785 MHz).
+Status 2026-10-29: phase 2 done, phase 3 (the launcher, the demo fight on a console) next.
+- Phase 1: `port/switch/spike`, a homebrew program that checks on a console what the port depends on (memory,
+  speed, OpenGL), passed everything in three runs on a console (see "Results"): the 4 GB window maps at the fixed
+  place every time, code runs at W + 0x20000000, every OpenGL program of the renderer compiles, and the game's
+  software float is 3.4 to 4.2 times slower than on the build machine's Xeon at the stock 1020 MHz (about 2.2 times
+  at 1785 MHz).
+- Phase 2: `BT3_CC=nx64` compiles the whole game and links it with libnx into `port/build/bt3_nx`, an ELF at the
+  window + 0x20000000 (see "The build"), in the `switch` workflow's `game` job. What it calls that the Switch does
+  not have yet is a stub (`port/build/stubs.txt`): SDL3 (phase 4), `eglGetProcAddress` (Mesa, phase 4), and
+  `execv`, `execvp`, `waitpid` (the Switch has no processes); the game's own stubs are the same as Linux's.
 
 ## Ground rule
 
@@ -28,7 +33,7 @@ puts the game on the HOME menu once and is never updated; every update changes o
 
    ```
    <SD>/atmosphere/contents/0100B73DEC000000/      the game's folder: the PC release folder, for the Switch
-       Tenkaichi3Decomp.nro      the game                         (PC: Tenkaichi3Decomp / .exe)
+       Tenkaichi3Decomp          the game, an ELF                 (PC: Tenkaichi3Decomp / .exe)
        Tenkaichi3Decomp.dat      its data-table list              (PC: the same)
        gamedata/                 unpacked from your disc; mods in gamedata/mods/
        saves/                    memory card saves (the PC's own format: copy them between PC and Switch)
@@ -40,7 +45,7 @@ puts the game on the HOME menu once and is never updated; every update changes o
    No self-test (the program is for the Switch, not the PC). Adding the European languages later works as on PC.
 3. **Install the `.nsp` once** with a title installer (DB Installer, Goldleaf, Tinfoil, ...). The HOME menu has
    *Tenkaichi3Decomp* with its icon from then on.
-4. **Play**: the HOME menu's icon starts the launcher in the NSP, which loads `Tenkaichi3Decomp.nro` from the
+4. **Play**: the HOME menu's icon starts the launcher in the NSP, which loads `Tenkaichi3Decomp` from the
    folder (below). F1 is + and - together (the PC's START + SELECT), as on a PC controller.
 5. **Updates**: the game asks GitHub for the newest release as on PC; the asset is `Tenkaichi3Decomp-switch.zip`
    (with its `.sig`), whose contents are the folder above without the player's files. The same rules as on PC: the
@@ -68,48 +73,74 @@ the PS2's addresses (window + address), with the program at window + 0x20000000.
 macOS arm64 build (docs/port/macos_plan.md: the `macwin` LLVM pass, `Port_Window`), which the Switch build shares;
 Horizon also has no `mmap` at a chosen address.
 
-So the NSP holds a small launcher in the manner of nx-hbloader, which rarely changes:
+The window is at a fixed place, W = 0x4000000000 (256 GB; `NX_WINDOW` in port/tools/toolchain.py, `PORT_WINDOW`
+in port/src/port_addr.h), and the program is linked for W + 0x20000000 (see "The build"). So the NSP holds a small
+launcher in the manner of nx-hbloader, which rarely changes:
 
 1. finds the game's folder (`sdmc:/atmosphere/contents/0100B73DEC000000/`; a message with what to do when it is
    missing: run the setup, copy the folder, check the card);
-2. finds a free 4 GB-aligned window W of 4 GB in the address space (svcQueryMemory, clear of the heap, alias and
-   stack regions), and reserves it;
-3. maps the game's regions at W + their PS2 addresses (heap 0x003BE000-0x02000000, its stack at 0x02000000, the
-   register blocks at 0x10000000 and 0x12000000, the low arena at 0x13000000, the scratchpad at 0x70000000:
-   `port/src/plat_mem.c`) and the program `Tenkaichi3Decomp.nro` at W + 0x20000000, with svcMapProcessCodeMemory
-   and svcSetProcessMemoryPermission (code read-execute, data read-write), as homebrew loaders map a program;
+2. checks that the window W .. W + 4 GB is free (svcQueryMemory, clear of the heap, alias and stack regions, which
+   ASLR places anew at each start). The spike found it free in all three starts; when it is not, the launcher
+   starts the application again (`appletRestartProgram`), which places those regions elsewhere;
+3. loads the program `Tenkaichi3Decomp` (an ELF: its three segments) at W + 0x20000000, with
+   svcMapProcessCodeMemory and svcSetProcessMemoryPermission (code read-execute, read-only data, data read-write),
+   as homebrew loaders map a program;
 4. starts it with the homebrew ABI (as nx-hbloader does: the heap, the process handle, the allowed calls, the
-   arguments, and W), and when it returns asking to be loaded again (Restart now after an update), unmaps it and
-   loads the new one.
+   arguments with the program's path first), and when it returns asking to be loaded again (Restart now after an
+   update), unmaps it and loads the new one.
 
-The NPDM gives the launcher what that needs: the application's memory (about 3.2 GB), a 39-bit address space, and
-the calls svcMapProcessCodeMemory (0x77), svcUnmapProcessCodeMemory (0x78), svcSetProcessMemoryPermission (0x73)
-and svcQueryMemory.
+The program then maps the game's regions itself, at W + their PS2 addresses, as it does on every system
+(port/src/plat_mem.c, its Switch branch, the same calls): the heap 0x003BE000-0x02000000, its stack at 0x02000000,
+the register blocks at 0x10000000 and 0x12000000, the low arena at 0x13000000 and the scratchpad at 0x70000000.
+Horizon has no memory taken page by page as used, so the low arena (192 MB of address space on PC) is backed in
+full; the console gives an application about 3.2 GB.
 
-Two open points, which the spike answers or narrows:
-- **Where W lands.** ASLR places the heap, alias and stack regions at random in the 512 GB space each start; the
-  spike reports whether a fixed W (256 GB) is free and which W it found. The program's 4-byte slots for addresses of
-  its own globals hold offsets from W (`.long g - W` at link time), which do not change when W does, so the program
-  can be linked once at W0 + 0x20000000 and loaded at any W + 0x20000000 with its 8-byte pointers relocated (as
-  libnx's start-up does for a homebrew program) — if the linker accepts that combination; otherwise a post-link
-  step writes those slots (as `make_dat.py` does on macOS).
-- **The low arena.** On PC it is 192 MB of address space with pages taken as they are first used; Horizon has no
-  such lazy memory, so on the Switch `Port_LowAlloc` maps more of it as it grows.
+The NPDM gives the launcher what that needs: the application's memory, a 39-bit address space, and the calls
+svcMapProcessCodeMemory (0x77), svcUnmapProcessCodeMemory (0x78), svcSetProcessMemoryPermission (0x73) and
+svcQueryMemory.
 
-### The build (variant `nx64`)
+### The build (variant `nx64`), as built
 
-As `mac64` (docs/port/macos_plan.md, "Native arm64: how the build works"), with ELF instead of Mach-O:
+```
+port/switch/sdl3_headers.sh                                  # once: SDL3's headers (the functions come in phase 4)
+BT3_CC=nx64 BT3_SKELETON=1 python3 port/tools/undefined.py   # compile
+BT3_CC=nx64 BT3_SKELETON=1 python3 port/tools/link.py        # -> port/build/bt3_nx, .dat, .mem, .map
+```
 
-- game code: clang 22 (the release container already has it) to LLVM IR, the `macwin` window pass, then
-  `llc -mtriple=aarch64-none-elf -mattr=-fp-armv8,-neon` (the game's floats in software, port/src/softfloat_ps2.c,
-  as on every 64-bit build);
-- port code and libraries: devkitA64 (GCC 15) with libnx, `-mtp=soft`, as homebrew is built;
-- data tables (`.s`): a variant of `port/tools/macho.py` for ELF (window offsets);
-- link: devkitA64's linker with libnx's `switch.specs` and the program placed at W0 + 0x20000000; then `elf2nro`.
+Needs devkitPro's devkitA64 with libnx and the Switch portlibs (`DEVKITPRO`, default /opt/devkitpro; the
+`devkitpro/devkita64` container has them), LLVM 22 with its development files (`BT3_LLVM` names its bin/ folder;
+default /usr/lib/llvm-22/bin, apt.llvm.org's) and clang's Python bindings for `ptr32.py`. The `switch` workflow's
+`game` job does exactly this in the container. It is `mac64` (docs/port/macos_plan.md, "Native arm64: how the build
+works") with ELF instead of Mach-O:
 
-`port/release/Dockerfile` gets devkitA64 (or the release workflow a second job in `devkitpro/devkita64`, as the spike
-workflow does), so the Switch archive is built from the repository alone like the others (`BT3_SKELETON=1`: the
-data tables are fetched from the player's disc).
+- **Game code** (and the port's software-float files): preprocess, `eeconst.py`, `ptr32.py` as everywhere, then
+  clang 22 `--target=aarch64-none-elf` (newlib's headers from devkitA64) to LLVM IR, the `macwin` window pass in its
+  two steps, `default<O2>`, and `llc -mtriple=aarch64-none-elf -mcpu=cortex-a57 -mattr=-fp-armv8,-neon
+  -relocation-model=static`. LLVM 22 keeps the game's pointers 4 bytes wide on this target too (its datalayout has
+  `p270:32:32-p271:32:32`). The pass takes `-bt3-window-base=0x4000000000`: W in constant data is that number (on
+  macOS it is `_mh_execute_header - 0x20000000`); code still loads `Port_Window`.
+- **The renderer, the settings window, ImGui** (hardware float): devkitA64's GCC 15 with libnx's flags (`-mtp=soft`),
+  SDL3's headers. ImGui's OpenGL loader has a Switch branch (`eglGetProcAddress`; there are no shared libraries).
+  `gs_gpu.c` gets placeholder SPIR-V: the Switch draws only through OpenGL.
+- **Data tables** (`port/data/*.s`): `macho.elf_asm`, a pointer `.long g` becomes `.long g - 0x4000000000` (GNU ld
+  resolves it to the window offset). The game's `_ctype_` (the PS2 C library's character table, read by the
+  password screen) is named `bt3_ps2_ctype_` in the tables and in the game's objects (`llvm-objcopy`), because the
+  Switch's C library has its own (`macho.NX_RENAME`).
+- **Link** (`link_nx`): devkitA64's GCC with `port/switch/nx.specs` (libnx's `switch.specs` without `-pie`),
+  `--defsym=__start__=0x4020000000` (where libnx's linker script starts the program), `--wrap=main` (plat_mem.c runs
+  the game's main() on its stack in the window), libnx. libnx programs are position-independent at 0 and its
+  start-up applies their relocations; this one has none, and `port/switch/nx_dynamic.s` gives it the empty dynamic
+  section the start-up looks for. Checked in the result: one load address, `0x4020000000`; no relocations; a table's
+  pointer holds the window offset (`gBattleReplay + 12296` in `D_002C3398`); game code reads W from `Port_Window`.
+- **After the link**: `make_state.py` and `make_dat.py` read GNU ld's map as on Linux and write game addresses
+  (window offsets), as on macOS.
+- **One compiler helper of its own**: without its float unit, AArch64 code converts an unsigned 32-bit integer to
+  float through `__floatundisf` (x86 calls `__floatunsisf`); `softfloat_ps2.c` defines it for the Switch, exact as
+  `__floatunsisf` for every 32-bit value. Every other float helper the objects call is the port's own (checked in
+  the map).
+
+The Linux build was compiled before and after these changes in the same place: its game objects are the same
+instruction for instruction.
 
 ### The platform layer
 
@@ -150,7 +181,7 @@ an `.nro` from the homebrew menu through a game (hold R): the same folder, no HO
 |---|---|
 | 0. Design, spike | This file; `port/switch/spike` builds in CI (`switch` workflow, artifact `bt3-switch-spike`). **Done.** |
 | 1. Spike on a console | Its report (`sdmc:/switch/bt3_spike.txt`) is in this file: the window maps, code runs at W + 0x20000000, the speed is known, every GL program compiles. **Done** (2026-10-29): three runs, two at the stock clock, all passed. |
-| 2. The game builds for the Switch | `BT3_CC=nx64` compiles and links the whole game with libnx (`BT3_SKELETON=1`), in CI. |
+| 2. The game builds for the Switch | `BT3_CC=nx64` compiles and links the whole game with libnx (`BT3_SKELETON=1`), in CI. **Done** (2026-10-29): `port/build/bt3_nx`; stubs for SDL3 and four system calls. |
 | 3. The demo fight on a console | The launcher loads the game; the attract-demo fight runs without a picture and its `BT3_HASH` lines (written to the card) equal Linux's (`compare_hash.py`). |
 | 4. Playable | The platform layer: picture (GL), sound, controllers; the game plays from boot to a fight and saves. |
 | 5. The package | The setup's Switch mode, the NSP from the player's keys, `Tenkaichi3Decomp-switch.zip` in the release workflow, the updater's Switch asset and its restart through the launcher. |
