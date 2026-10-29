@@ -277,6 +277,11 @@ static int clip_part(const char *name, int x, int top) {
     if (sMenuScreen == 13 && (starts(name, "mc_yuragi_") || starts(name, "mc_taki") || starts(name, "mc_sakana"))) {
         return PORT_MENU_FILL; /* (Dragon History: its scenery, the waterfall, its shimmer, the fish, with the backdrop) */
     }
+    if ((sMenuScreen == 38 || sMenuScreen == 18 || sMenuScreen == 42) && top && starts(name, "mc_ch_")) {
+        return PORT_MENU_FILL; /* (the item shop's, Training's and Evolution Z's scene characters (Oolong at the window,
+                                  Goten, Videl) are drawn with pieces of their scenery as wide as the screen: with the
+                                  scenery, which fills the width there) */
+    }
     if (sMenuScreen >= 10 && top &&
         (starts(name, "mc_guide_") || strcmp(name, "mc_pikkoro") == 0 || strcmp(name, "mc_ch_gohan") == 0 || strcmp(name, "mc_ch_bidel") == 0 ||
          strcmp(name, "mc_ch_goten") == 0 || strcmp(name, "mc_ch_uron") == 0)) {

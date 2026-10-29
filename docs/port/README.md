@@ -4520,7 +4520,9 @@ converted for it has its 2D at its true shape across the whole width, the way th
   (`mc_menu_text_*`, `mc_plate_text_*`, `mc_suji_01`, `mc_dragonball_off_*`); its list and timer stay on the right.
 - Evolution Z (42) and Training (18), like Dragon History, have their page's own pieces filling the width: their
   scenery (Kame House, the training ground) is drawn by the page in pieces, which narrowed broke it into blocks.
-  The item shop's page (anchor 17) fills likewise, its counters still against the right edge. Text queued in a
+  The item shop's page (anchor 17) fills likewise, its counters still against the right edge. Their scene
+  characters (`mc_ch_*`: Oolong at the shop's window, Goten, Videl) fill with the scenery: their clips hold
+  pieces of it as wide as the screen (a second tree in Training, clouds over the shop's window). Text queued in a
   part that fills (their message windows) is kept at its true shape in the middle (`Font_AllocCmd`). World Tour's
   window arrows (`mc_yajirusi_l` / `_r`, inside the list's arrow clip) are with the window (not seen by picture). World Tour's announcer poster is in the middle
   and not cut at the 4:3 edges (part `PORT_MENU_CENTER_FREE`, anchor 19): it flies across the whole picture.
