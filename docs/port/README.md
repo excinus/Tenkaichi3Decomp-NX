@@ -4527,6 +4527,10 @@ converted for it has its 2D at its true shape across the whole width, the way th
   window, Character Reference's list). Still pieces are cut as before: the game parks pieces just off the 4:3
   screen. Checked: every screen's settled frames as before; only transition frames differ.
   `BT3_MENU_MOVECLIP=1` (testing) cuts moving pieces too.
+  The game also tells it (`Port_MenuClipMoving`, gs_marker.c): a clip of a converted screen's movie whose position
+  changed within its screen's last 10 draws is moving, and is drawn whole (markers 0x2D / 0x2E). The renderer's own
+  test cannot follow a plate drawn as several alike pieces: on the title, New Game's text slid in whole while its
+  plate was still cut.
 - Evolution Z (42) and Training (18), like Dragon History, have their page's own pieces filling the width: their
   scenery (Kame House, the training ground) is drawn by the page in pieces, which narrowed broke it into blocks.
   The item shop's page (anchor 17) fills likewise, its counters still against the right edge. Their scene

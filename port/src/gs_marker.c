@@ -76,7 +76,11 @@ int Port_MenuPartNow(void) {
 /* A converted screen's draw begins (its number) / ends (0). A screen's draw can call another's (a backdrop drawn by
    a function of its own): the end of the inner one goes back to the outer one. */
 static int sPageStack[8], sPageDepth;
+static int sMoveDraw; /* converted screens' draws so far (Port_MenuPage): Port_MenuClipMoving's clock */
 void Port_MenuPage(int screen) {
+    if (screen != 0 && sPageDepth == 0) {
+        sMoveDraw++; /* (a draw of a converted screen: Port_MenuClipMoving's clock) */
+    }
     if (screen != 0) {
         if (screen == sMenuScreen) {
             return; /* (marked again in the same draw, as character select does per stage picture: one page) */
@@ -297,4 +301,52 @@ static int clip_part(const char *name, int x, int top) {
         return -2;
     }
     return PORT_MENU_NONE;
+}
+
+/* Whether a clip of a converted screen's movie is moving (sliding in or out): its position changed within the last
+   10 draws of its screen. Then the clip is drawn whole, not cut at the 4:3 screen's edges (marker 0x2D, and 0x2E
+   after it): the renderer's own test of a piece's motion (menu_piece_moving) cannot follow a plate drawn as several
+   alike pieces, whose text then moved ahead of it uncut. Clips of the movie itself only; what they hold goes with
+   them. */
+#define MOVE_CLIPS 128
+static struct { char name[48]; int screen, x, lastDraw, moved; } sMoveClip[MOVE_CLIPS];
+int Port_MenuClipMoving(const char *name, int x, int top) {
+    int i, freeSlot = -1, oldest = 0;
+    if (sMenuScreen == 0 || !top) {
+        return 0;
+    }
+    for (i = 0; i < MOVE_CLIPS; i++) {
+        if (sMoveClip[i].screen == sMenuScreen && strcmp(sMoveClip[i].name, name) == 0) {
+            break;
+        }
+        if (sMoveClip[i].screen == 0 && freeSlot < 0) {
+            freeSlot = i;
+        }
+        if (sMoveClip[i].lastDraw < sMoveClip[oldest].lastDraw) {
+            oldest = i;
+        }
+    }
+    if (i == MOVE_CLIPS) {
+        i = freeSlot >= 0 ? freeSlot : oldest;
+        snprintf(sMoveClip[i].name, sizeof(sMoveClip[i].name), "%s", name);
+        sMoveClip[i].screen = sMenuScreen;
+        sMoveClip[i].x = x;
+        sMoveClip[i].moved = -1000;
+    } else if (sMoveClip[i].x != x) {
+        sMoveClip[i].x = x;
+        sMoveClip[i].moved = sMoveDraw;
+    }
+    sMoveClip[i].lastDraw = sMoveDraw;
+    return sMoveDraw - sMoveClip[i].moved <= 10;
+}
+
+/* The clip being drawn moves (1) or not (0); returns what was before. */
+static int sMenuFreeNow;
+int Port_MenuFree(int on) {
+    int prev = sMenuFreeNow;
+    if (on != sMenuFreeNow) {
+        sMenuFreeNow = on;
+        Port_GsMarker(on ? 0x2D : 0x2E);
+    }
+    return prev;
 }

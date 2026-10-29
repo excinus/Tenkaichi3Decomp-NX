@@ -122,6 +122,7 @@ static int sGlowIsGlare; /* the glow chain under way is the sky's glare (gfxm_a.
 static int sBlockSample; /* the draw being set up reads a work buffer at the GS's 1x (orig.x): pipeline_get, key bit 25 */
 static int sTexPackOn = 1; /* the setting: use the texture pack (if one was found) */
 int gsAnchor;
+static int sMenuFree; /* widescreen menus: the clip being drawn moves (markers 0x2D / 0x2E, gs_marker.c): not cut */
 /* A fight's HUD in a picture wider than 4:3 (setting hud_layout, BT3_HUD=<n> for a test):
      0  the side panels at the screen's edges (as since widescreen)
      1  the same, with the health bars drawn longer, up to the timer (hud_b.c, pull request #28)
@@ -212,6 +213,7 @@ static int menu_piece_moving(const Vtx *v, const Vtx *last, float x0, float x1, 
 }
 
 void GsGpu_ListStart(void) {
+    sMenuFree = 0;
     gDrawStartNs = SDL_GetTicksNS(); /* (gs_gpu.c's clock, where it is compared) */
     gDrawTexNs = gDrawPipeNs = gDrawUpBytes = gDrawImgNs = gDrawLookNs = gDrawVuNs = gDrawXferNs = 0;
     gDrawNewTex = gDrawImgMade = gDrawImgFreed = gDrawImgPooled = 0;
@@ -1783,7 +1785,7 @@ void GsGpu_Draw(int type, int ctx, const GsVertex *v) {
                 d.scissor[2] = (int)(b * (float)SCALE + 0.5f) - d.scissor[0];
             }
             if ((gsAnchor == 9 || (gsAnchor >= 11 && gsAnchor <= 19)) && !noclip && !(gsAnchor == 13 && y1 - y0 >= 300.0f) && gsAnchor != 19 &&
-                !menu_piece_moving(&gsVerts[d.first], &gsVerts[gsVertCount - 1], x0, x1, y1 - y0)) {
+                !sMenuFree && !menu_piece_moving(&gsVerts[d.first], &gsVerts[gsVertCount - 1], x0, x1, y1 - y0)) {
                 /* and what lies beyond the page's edge (plates sliding in) stays out of sight, as on the 4:3 screen.
                    Not character select's big pictures (13, taller than 300): they slide outwards when a stage is
                    chosen, and are not parked off the screen. */
@@ -2080,6 +2082,10 @@ void GsGpu_Native(int effect) {
     }
     if (effect == 0x20 || effect == 0x21) { /* the glow chain begins / ends (target_lowres) */
         sInGlowChain = effect == 0x20;
+        return;
+    }
+    if (effect == 0x2D || effect == 0x2E) {
+        sMenuFree = effect == 0x2D;
         return;
     }
     if (effect != 1 || gsDrawCount == MAX_DRAWS || (gsFxOff & 1)) {

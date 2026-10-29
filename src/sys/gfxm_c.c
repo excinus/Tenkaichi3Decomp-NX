@@ -12,6 +12,8 @@
 /* (whole numbers across: the game's code passes floats in other registers than the port's C does) */
 extern int Port_MenuClipPart(const char *name, int x, int top); /* port/src/gs_marker.c: widescreen menus */
 extern int Port_MenuClipPlace(int x0, int x1);
+extern int Port_MenuClipMoving(const char *name, int x, int top);
+extern int Port_MenuFree(int on);
 static int gPortFlashMeasure;  /* FlashDraw_Quad only measures (gPortFlashBox: the leftmost and rightmost x) */
 static float gPortFlashBox[2];
 extern int Port_MenuPart(int part);
@@ -670,6 +672,8 @@ void FlashSlot_Draw(FlashSlot *slot, FlashProp *parent, Flash *flash) {
             /* widescreen menus: the clip (and what it holds, its text too) anchored as its screen has it
                (port/src/gs_marker.c); a clip whose side goes by where it is is measured first */
             int part = Port_MenuClipPart(clip->name, (int)(prop.mtx.m[2] + (f32)flash->ofs[0]), parent == NULL);
+            int moving = Port_MenuClipMoving(clip->name, (int)(prop.mtx.m[2] + (f32)flash->ofs[0]), parent == NULL);
+            int freePrev = moving ? Port_MenuFree(1) : -1;
             int prev;
             if (part == -2) {
                 gPortFlashMeasure = 1;
@@ -691,6 +695,9 @@ void FlashSlot_Draw(FlashSlot *slot, FlashProp *parent, Flash *flash) {
 #ifdef PORT
             if (part >= 0) {
                 Port_MenuPart(prev);
+            }
+            if (freePrev >= 0) {
+                Port_MenuFree(freePrev);
             }
         }
 #endif
