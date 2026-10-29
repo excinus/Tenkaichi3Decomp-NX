@@ -3,9 +3,11 @@
 The Switch port is PLANNED: nothing of the game runs on a Switch yet. This file is the design, the plan and the
 record of what was checked; update it as phases land, as docs/port/macos_plan.md is for the Mac.
 
-Status 2026-10-29: phase 0. The design below; `port/switch/spike`, a homebrew program that checks on a console
-what the port depends on (memory, speed, OpenGL), built by `.github/workflows/switch.yml`. It has not been run on a
-console yet: that is phase 1, and its results decide the next phases.
+Status 2026-10-29: phase 1. The design below; `port/switch/spike`, a homebrew program that checks on a console
+what the port depends on (memory, speed, OpenGL), built by `.github/workflows/switch.yml`. Its first run on a console
+passed everything (see "Results"): the 4 GB window maps at the fixed place, code runs at W + 0x20000000, every
+OpenGL program of the renderer compiles, and the game's software float is about 2.2 times slower than on the build
+machine's Xeon (with the console's CPU at 1785 MHz). Still to run: a second start, and one at the stock 1020 MHz.
 
 ## Ground rule
 
@@ -147,7 +149,7 @@ an `.nro` from the homebrew menu through a game (hold R): the same folder, no HO
 | Phase | Done when |
 |---|---|
 | 0. Design, spike | This file; `port/switch/spike` builds in CI (`switch` workflow, artifact `bt3-switch-spike`). **Done.** |
-| 1. Spike on a console | Its report (`sdmc:/switch/bt3_spike.txt`) is in this file: the window maps, code runs at W + 0x20000000, the speed is known, every GL program compiles. |
+| 1. Spike on a console | Its report (`sdmc:/switch/bt3_spike.txt`) is in this file: the window maps, code runs at W + 0x20000000, the speed is known, every GL program compiles. **First run passed** (2026-10-29); a second start and a run at 1020 MHz to come. |
 | 2. The game builds for the Switch | `BT3_CC=nx64` compiles and links the whole game with libnx (`BT3_SKELETON=1`), in CI. |
 | 3. The demo fight on a console | The launcher loads the game; the attract-demo fight runs without a picture and its `BT3_HASH` lines (written to the card) equal Linux's (`compare_hash.py`). |
 | 4. Playable | The platform layer: picture (GL), sound, controllers; the game plays from boot to a fight and saves. |
@@ -157,7 +159,10 @@ an `.nro` from the homebrew menu through a game (hold R): the same folder, no HO
 Biggest risk: **speed**. The game's arithmetic is exact software float (the README asks for a recent mid-range PC
 processor); the Switch has four Cortex-A57 cores at 1020 MHz (1785 MHz is common with overclocking). The spike times
 the same routines on the console; on this project's build machine (Xeon at 2.1 GHz, 2026-10-29) they take 5.7-6.9 ns
-per operation and the memory walk 2.8 ns per step. If the console is too slow for full speed even with the renderer
+per operation and the memory walk 2.8 ns per step; on the console at 1785 MHz 13.5 ns and 3.9 ns (see "Results"),
+so about 2.2 times the PC's time for the game's arithmetic; at the stock 1020 MHz about 3.5 to 4 times, to be
+measured. Whether that is full speed is known only when the game's own demo fight runs (phase 3): its time per
+field on Linux, multiplied by that, against the 16.7 ms of a field. If the console is too slow for full speed even with the renderer
 on another core, the options are the hot paths in faster exact code (the vector library in integer NEON),
 or a mode that skips drawing frames.
 
@@ -187,4 +192,66 @@ What it does (`port/switch/spike/source/main.c`):
 
 ## Results
 
-(none yet)
+### 2026-10-29, first run (a player's console)
+
+Running as an application through a game (hold R), system 22.5.0, Atmosphère; CPU at 1785 MHz (overclocked: the
+stock clock is 1020 MHz). The whole report, as written to `sdmc:/switch/bt3_spike.txt`:
+
+```
+[1] Memory window
+  address space 0x8000000 + 0x7ff8000000
+  heap region   0x5863000000 + 0x200000000
+  alias region  0x6bab400000 + 0x1000000000
+  stack region  0x3adfc00000 + 0x80000000
+  memory: 3285 MB for this process, 3281 MB used
+  process handle 0x581fa; svcs allowed: MapProcessCodeMemory 1, SetProcessMemoryPermission 1, Unmap 1
+  window W = 0x4000000000 (the fixed choice is free)
+  ok   game heap                  W+003BE000, 28936 KB
+  ok   game stack                 W+02000000, 16384 KB
+  ok   hardware registers         W+10000000, 64 KB
+  ok   GS registers               W+12000000, 8 KB
+  ok   low arena (16 of 192 MB)   W+13000000, 16384 KB
+  ok   scratchpad                 W+70000000, 16 KB
+  ok   code at W+20000000 returned 42 (42 expected)
+  memory window: PASS
+
+[2] Processor
+  CPU clock: 1785 MHz
+  soft float: 13.52 ns per operation (check 3E600658)
+  memory walk: 3.91 ns per step (check 7F8C0DCC)
+
+[3] OpenGL
+  4.3 (Core Profile) Mesa 20.1.0-rc3
+  NV120
+  GLSL 4.30
+  context 4.3 core, clip control yes
+  ok   gs          63 ms
+  ok   vu0         66 ms
+  ok   vu4         49 ms
+  ok   vu6         52 ms
+  ok   gs nz       42 ms
+  ok   vu0 nz      64 ms
+  ok   vu4 nz      47 ms
+  ok   vu6 nz      49 ms
+  ok   gs wb       70 ms
+  ok   outline     22 ms
+  ok   alphakey     5 ms
+  ok   dclut        7 ms
+  OpenGL: PASS
+```
+
+What it settles:
+- **The memory model works on Horizon.** The calls are allowed to a program under the homebrew loader, the regions
+  map at W + their PS2 addresses, and code mapped at W + 0x20000000 runs. The fixed W of 256 GB was free: ASLR put
+  the stack region at 235 GB, the heap at 353 GB and the alias region at 430 GB, all clear of it, but they move from
+  start to start, so the launcher still checks it and falls back to another 4 GB-aligned window (the second run is
+  to show how often it must).
+- **The checks' results are the PC's** (`check 3E600658`, `check 7F8C0DCC`, the same as the Xeon's): the software
+  float gives the same bits on the console, as the online play with PCs needs.
+- **Speed**: 13.5 ns per soft-float operation against 5.7-6.9 ns on the Xeon at 2.1 GHz (about 2.2 times), the memory
+  walk 3.9 ns against 2.8 ns, at 1785 MHz.
+- **OpenGL**: Mesa gives a 4.3 core context when 3.3 is asked for, with clip control (so `gs_gl.c` takes its
+  `glClipControl` path); all twelve programs compile and link. Compiling them takes about 0.5 s in all, once at
+  start.
+- The process had 3285 MB, nearly all of it taken by libnx's heap at start (as homebrew does), so the regions come
+  from that heap, as the launcher's would.
