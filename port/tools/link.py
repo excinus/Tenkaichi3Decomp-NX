@@ -47,6 +47,11 @@ def link_mac(objs, extra):
     moved = [f"-Wl,-segaddr,{s},{MAC_BASE + a - first:#x}" for s, a, _ in segs if s != "__LINKEDIT"]
     return subprocess.run(cmd + moved, capture_output=True, text=True)
 
+# libnx's file service calls, counted by port/src/plat_nxfs.c
+NX_FS_WRAPPED = ["fsFsCreateFile", "fsFsDeleteFile", "fsFsCreateDirectory", "fsFsRenameFile", "fsFsRenameDirectory",
+                 "fsFsGetEntryType", "fsFsGetFileTimeStampRaw", "fsFsOpenFile", "fsFsOpenDirectory", "fsFileRead",
+                 "fsFileWrite", "fsFileFlush", "fsFileGetSize", "fsFileSetSize", "fsFileClose", "fsDirRead", "fsDirClose"]
+
 def link_nx(objs, extra):
     """The Switch: devkitA64's linker with libnx, NOT position-independent (port/switch/nx.specs: libnx's own specs
     without -pie), the program at the window + 0x20000000 (__start__, where libnx's linker script begins). The
@@ -64,7 +69,8 @@ def link_nx(objs, extra):
           ["-lEGL", "-lglapi", "-ldrm_nouveau"] + \
           [f"-L{DEVKITPRO}/portlibs/switch/lib", f"-L{DEVKITPRO}/libnx/lib", "-lstdc++", "-lnx", "-lm",
            f"-Wl,--defsym=__start__={NX_WINDOW + 0x20000000:#x}", "-Wl,--wrap=main", f"-Wl,-Map={EXE}.map",
-           "-Wl,--emit-relocs"]  # (kept for nx_reloc.py: the launcher may load the program into another window)
+           "-Wl,--emit-relocs"] + \
+          [f"-Wl,--wrap={f}" for f in NX_FS_WRAPPED]  # (kept for nx_reloc.py: the launcher may load the program into another window)
     argsfile = B / "link_nx64.rsp"
     argsfile.write_text("\n".join('"' + a + '"' for a in cmd[1:]))
     return subprocess.run([cmd[0], "@" + str(argsfile)], capture_output=True, text=True, env=env)

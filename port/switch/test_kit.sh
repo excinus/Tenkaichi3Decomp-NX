@@ -84,12 +84,13 @@ its setup made from your disc). If you ran an earlier kit, the gamedata folder i
    its F1 key): the D-pad moves, B (Cross) selects, A (Circle) goes back, L/R change the tab, and the touch screen
    works as a mouse there. Its "Exit game" button ends the game; its Controls tab changes the buttons.
 5. Tell what works and what does not (picture, sound, controllers, menus, a fight, its speed), and send from
-   atmosphere/contents/0100B73DEC000000/:  bt3_log.txt, and bt3_crash.txt if there is one. After a crash the
-   launcher shows the report's first lines at its next start. The log is written to the card twice a second, so it
-   is there even when the game hangs and is closed with HOME (each start keeps the one before as bt3_log_prev.txt).
-6. If the screen stays black and the console becomes slow (as with the first kit): wait a minute, close the game
-   with HOME, and send bt3_log.txt. Then open bt3_env.txt in that folder with a text editor, remove the # in front
-   of BT3_NOSOUND=1, start the game again, and say whether it gets further without sound (and send that log too).
+   atmosphere/contents/0100B73DEC000000/:  bt3_log.txt, bt3_watch.txt, and bt3_crash.txt if there is one (each
+   start keeps the one before as bt3_log_prev.txt and bt3_watch_prev.txt: send those too if the game was started
+   again since). After a crash the launcher shows the report's first lines at its next start.
+6. If the screen stays black and the console becomes slow (as with the first kits): wait a minute, close the game
+   with HOME, and send bt3_watch.txt and bt3_log.txt even if they look empty or short. bt3_watch.txt is written
+   every 2 seconds by a part of the program that watches the rest: what it was doing, and how often it used the
+   SD card. To start without sound: in bt3_env.txt, remove the # in front of BT3_NOSOUND=1.
 
 Saves are in saves/ in that folder, as on the PC (copy them between PC and Switch). Online play is not ready yet.
 TXT

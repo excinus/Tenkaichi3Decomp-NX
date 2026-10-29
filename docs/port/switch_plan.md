@@ -446,3 +446,15 @@ which would slow the volume buttons and HOME as seen. Not shown yet; the next ki
   playing, and waits a period after a refused buffer or a failed wait instead of trying again at once;
 - `bt3_env.txt` has `#BT3_NOSOUND=1`: with the `#` removed the game starts without sound, which shows whether the
   sound is what hangs it.
+
+The kit of commit 910eb9f (the above), the same console: the same black screen and slow console with sound and
+with `BT3_NOSOUND=1`, and the log empty both times, even the `bt3_env.txt` line written before anything else (the
+language list's sounds had played in the first start). So the sound is not it, and the log's twice-a-second
+`fsync` did not reach the card either: whatever slows the console holds up the program's own file writes too, as
+it holds up the console's menus. The next kit counts instead of guessing (`port/src/plat_nxfs.c`): every call of
+libnx's file service (the C library's fopen, fread, stat, mkdir... go through them; the link wraps them) is
+counted by kind, with the path most named; past 4000 calls a second each further call waits a millisecond (the
+console stays usable and the program goes on, slower); and the watch thread writes, every 2 seconds, a line to
+`bt3_watch.txt` (opened and closed each time) with the counts, how late it woke, the frame counters and the start's
+stage. A flood of file calls shows there by kind and path; a console slowed by something else (the GPU, a busy
+processor) shows as few calls with nothing drawn, or the thread waking late.

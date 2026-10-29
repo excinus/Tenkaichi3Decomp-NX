@@ -394,21 +394,64 @@ static void game_main(void) {
 
 /* A thread of its own beside the game, twice a second:
    - the log onto the card (fsync): what the game wrote is kept even when it is ended from outside (HOME, or the
-     console turned off) while it hangs; without it the card's file stayed empty (the first console run of phase 4);
+     console turned off) while it hangs;
    - when the game has drawn nothing for 3 seconds (a hang, or a long load), a line in the log saying so, with how far
-     the start had got, again every 30 seconds while it lasts, and one when it draws again. */
+     the start had got, again every 30 seconds while it lasts, and one when it draws again;
+   - every 2 seconds for the first 3 minutes, and after that when the game draws nothing or calls the file service
+     more than 2000 times a second, a line in bt3_watch.txt (opened and closed each time, so that it is on the card
+     whatever happens to the log): the time, how late the thread woke (a busy processor), the frame counters, and
+     the file service's calls (plat_nxfs.c). The first kits of phase 4 hung the console with nothing in the log,
+     even with the fsync; this says what the program was doing. */
+extern int NxFs_Report(FILE *f, unsigned ms);
+extern unsigned long long NxFs_Total(void);
+extern void NxFs_SetThreads(Handle mainThread, Handle watchThread);
 static volatile int sWatchStop; /* the game has returned to the launcher */
+
+/* (times in milliseconds: this file is built with software float, which has no 64-bit integer to double) */
+static void watch_line(const char *what, unsigned t, unsigned late, unsigned frame, unsigned blank, int report) {
+    FILE *f = fopen("bt3_watch.txt", "a");
+
+    if (f == NULL) {
+        return;
+    }
+    fprintf(f, "%5u.%u s: %s; woke %u ms late; frame %u, blank %u; %s\n", t / 1000, t / 100 % 10, what, late, frame, blank,
+            gPortStage);
+    if (report) {
+        fprintf(f, "         ");
+        if (!NxFs_Report(f, 2000)) {
+            fprintf(f, "file service: no calls\n");
+        }
+    }
+    fclose(f);
+}
 
 static void nx_watch(void *arg) {
     extern unsigned gGsFrame, gPortVBlanks;
-    unsigned frame = gGsFrame, blank = gPortVBlanks, ticks = 0;
+    unsigned frame = gGsFrame, blank = gPortVBlanks, ticks = 0, n = 0;
+    u64 freq = armGetSystemTickFreq() / 1000, start = armGetSystemTick(), was = start;
+    unsigned late = 0;
 
     (void)arg;
+    remove("bt3_watch_prev.txt");
+    rename("bt3_watch.txt", "bt3_watch_prev.txt");
+    watch_line("started", 0, 0, frame, blank, 0);
     while (!sWatchStop) {
+        u64 now;
+        unsigned t, slept;
+        int still;
+
         svcSleepThread(500000000ull);
+        now = armGetSystemTick();
+        t = (unsigned)((now - start) / freq);
+        slept = (unsigned)((now - was) / freq);
+        if (slept > 500 && slept - 500 > late) {
+            late = slept - 500; /* (the most in this report's 2 seconds) */
+        }
+        was = now;
         fsync(fileno(stderr));
         fsync(fileno(stdout));
-        if (gGsFrame != frame || gPortVBlanks != blank) {
+        still = gGsFrame == frame && gPortVBlanks == blank;
+        if (!still) {
             if (ticks >= 6) {
                 fprintf(stderr, "bt3: watch: drawing again after %u.%u s\n", ticks / 2, ticks % 2 * 5);
             }
@@ -417,6 +460,17 @@ static void nx_watch(void *arg) {
             ticks = 0;
         } else if (++ticks == 6 || (ticks > 6 && ticks % 60 == 6)) {
             fprintf(stderr, "bt3: watch: nothing drawn for %u s (frame %u, blank %u; %s)\n", ticks / 2, frame, blank, gPortStage);
+        }
+        if (++n % 4 == 0) { /* (every 2 seconds) */
+            static unsigned long long before;
+            unsigned long long total = NxFs_Total();
+            if (t < 180000 || ticks >= 4 || total - before > 4000) {
+                watch_line(ticks >= 4 ? "nothing drawn" : "running", t, late, gGsFrame, gPortVBlanks, 1);
+            } else {
+                NxFs_Report(NULL, 2000); /* (the counts start again for the next report) */
+            }
+            before = NxFs_Total();
+            late = 0;
         }
     }
 }
@@ -431,7 +485,11 @@ int __wrap_main(int argc, char **argv) {
     if (R_SUCCEEDED(threadCreate(&watch, nx_watch, NULL, NULL, 0x10000, 0x2D, 1)) ||
         R_SUCCEEDED(threadCreate(&watch, nx_watch, NULL, NULL, 0x10000, 0x2D, -2)) ||
         R_SUCCEEDED(threadCreate(&watch, nx_watch, NULL, NULL, 0x10000, 0x3B, -2))) {
+        NxFs_SetThreads(threadGetCurHandle(), watch.handle);
         watching = R_SUCCEEDED(threadStart(&watch));
+    }
+    if (!watching) {
+        fprintf(stderr, "bt3: watch: the thread did not start\n");
     }
     sGameStackTop = (uint8_t *)Port_Ptr(STACK_BASE + STACK_SIZE);
     gPortStage = "the game is running (on its stack in the window)";
