@@ -78,20 +78,24 @@ the PS2's addresses (window + address), with the program at window + 0x20000000.
 macOS arm64 build (docs/port/macos_plan.md: the `macwin` LLVM pass, `Port_Window`), which the Switch build shares;
 Horizon also has no `mmap` at a chosen address.
 
-The window is at a fixed place, W = 0x4000000000 (256 GB; `NX_WINDOW` in port/tools/toolchain.py, `PORT_WINDOW`
-in port/src/port_addr.h), and the program is linked for W + 0x20000000 (see "The build"). So the NSP holds a small
-launcher in the manner of nx-hbloader, which rarely changes:
+The program is linked for the window W0 = 0x4000000000 (256 GB; `NX_WINDOW` in port/tools/toolchain.py) at
+W0 + 0x20000000, and can be moved with its window as a whole into any other free 4 GB window (see "The build":
+nothing in its code depends on where it is, and `<program>.rel` lists the 8-byte addresses in its data, which move
+with it). The window it runs in is `Port_Window`, the program's first byte less 0x20000000 (`PORT_WINDOW` in
+port/src/port_addr.h). So the NSP holds a small launcher in the manner of nx-hbloader, which rarely changes:
 
 1. finds the game's folder: next to the launcher if `Tenkaichi3Decomp` is there, else
    `sdmc:/atmosphere/contents/0100B73DEC000000/` (a message with what to do when it is missing);
-2. checks that the window W .. W + 4 GB is free (svcQueryMemory, clear of the heap, alias and stack regions, which
-   ASLR places anew at each start) and reserves it. The spike found it free in all three starts; when it is not, the
-   launcher says so (the NSP's will start the application again, `appletRestartProgram`, which places those regions
-   elsewhere);
+2. chooses a free window W .. W + 4 GB (svcQueryMemory, clear of the heap, alias and stack regions, which ASLR
+   places anew at each start): W0 when it is free, else the first free 4 GB-aligned one, and reserves it. (W0 was
+   free in the spike's three starts but not in the first test of the launcher, 2026-10-29: the system's regions
+   take about a sixth of the address space, and land on a fixed window now and then. Hence the moving.) When no
+   window is free it shows the address space's layout;
 3. loads the program `Tenkaichi3Decomp` (an ELF: its three segments) at W + 0x20000000, with
    svcMapProcessCodeMemory and svcSetProcessMemoryPermission (code read-execute, read-only data, data read-write),
    from the process's heap: its first 16 MB are the launcher's own C heap, then the segments, and the rest is the
-   game's heap;
+   game's heap. When W is not W0, each address `Tenkaichi3Decomp.rel` lists is moved by W - W0 in the copy before it
+   is mapped;
 4. closes its own system services (an application holds its applet proxy only once; the game's libnx opens its
    own), keeps its thread data aside, and starts the program with the homebrew ABI as nx-hbloader does (the heap,
    the process handle, the allowed calls, the applet type, `argv[0]` = the program's full path, which makes the
@@ -136,8 +140,11 @@ works") with ELF instead of Mach-O:
   clang 22 `--target=aarch64-none-elf` (newlib's headers from devkitA64) to LLVM IR, the `macwin` window pass in its
   two steps, `default<O2>`, and `llc -mtriple=aarch64-none-elf -mcpu=cortex-a57 -mattr=-fp-armv8,-neon
   -relocation-model=static`. LLVM 22 keeps the game's pointers 4 bytes wide on this target too (its datalayout has
-  `p270:32:32-p271:32:32`). The pass takes `-bt3-window-base=0x4000000000`: W in constant data is that number (on
-  macOS it is `_mh_execute_header - 0x20000000`); code still loads `Port_Window`.
+  `p270:32:32-p271:32:32`). The pass takes `-bt3-window-base=0x4000000000`: in data, a 4-byte pointer is the
+  window offset `g - 0x4000000000` (ELF cannot hold the difference of two symbols of different sections, which
+  Mach-O's subtractor relocations can), the same in any window; everywhere else, code included, W is libnx's
+  `__start__` (the program's first byte) less 0x20000000, reached PC-relatively, as `_mh_execute_header` is on
+  macOS. Code that makes host pointers loads `Port_Window`, as on macOS.
 - **The renderer, the settings window, ImGui** (hardware float): devkitA64's GCC 15 with libnx's flags (`-mtp=soft`),
   SDL3 for the Switch (linked as `libSDL3.a`). ImGui's OpenGL loader has a Switch branch (`eglGetProcAddress`; there are no shared libraries).
   `gs_gpu.c` gets placeholder SPIR-V: the Switch draws only through OpenGL.
@@ -152,7 +159,12 @@ works") with ELF instead of Mach-O:
   section the start-up looks for. Checked in the result: one load address, `0x4020000000`; no relocations; a table's
   pointer holds the window offset (`gBattleReplay + 12296` in `D_002C3398`); game code reads W from `Port_Window`.
 - **After the link**: `make_state.py` and `make_dat.py` read GNU ld's map as on Linux and write game addresses
-  (window offsets), as on macOS.
+  (window offsets), as on macOS. `nx_reloc.py` writes `bt3_nx.rel` from the relocations the link keeps
+  (`--emit-relocs`): the 8-byte slots holding an address in the window (R_AARCH64_ABS64 targets, and the global
+  offset table's entries, which the linker fills without one), 3703 of them; it stops the build if an instruction
+  holds an absolute address of the window (R_AARCH64_MOVW_UABS_*). Checked: the whole game built a second time for
+  another window (`BT3_NX_WINDOW=0x5300000000`) is, byte for byte apart from its build id, the first build with its
+  .rel's addresses moved by the difference.
 - **One compiler helper of its own**: without its float unit, AArch64 code converts an unsigned 32-bit integer to
   float through `__floatundisf` (x86 calls `__floatunsisf`); `softfloat_ps2.c` defines it for the Switch, exact as
   `__floatunsisf` for every 32-bit value. Every other float helper the objects call is the port's own (checked in

@@ -275,8 +275,8 @@ int __wrap_main(int argc, char **argv) {
 
 #elif defined(__SWITCH__)
 /* ------------------------------------------------------------------------------------------- Nintendo Switch
-   The macOS model (above) on Horizon (docs/port/switch_plan.md): the window is at the fixed PORT_WINDOW
-   (port_addr.h), the launcher loaded this program at window + 0x20000000 and left the rest of the window free.
+   The macOS model (above) on Horizon (docs/port/switch_plan.md): the launcher chose a free 4 GB window, loaded this
+   program at window + 0x20000000 and left the rest of it free (PORT_WINDOW, port_addr.h).
      - Horizon has no mmap at a chosen address: a region is memory from the C library's heap, mapped at its place
        with svcMapProcessCodeMemory and made read-write with svcSetProcessMemoryPermission (what homebrew loaders do
        to place a program; checked on consoles by port/switch/spike). The calls are allowed to this program by the
@@ -289,8 +289,11 @@ int __wrap_main(int argc, char **argv) {
 #include <unistd.h> /* chdir */
 #include <switch.h>
 
-/* The window's base for the game's code (port/tools/macwin/macwin.cpp loads it in every function). */
-void *Port_Window = (void *)PORT_WINDOW;
+/* The window's base for the game's code (port/tools/macwin/macwin.cpp loads it in every function): 0x20000000 below
+   the program's first byte (__start__, libnx's linker script), wherever the launcher loaded it. (An 8-byte pointer
+   in data: the launcher moves it with the program, port/tools/nx_reloc.py.) */
+extern char __start__[];
+void *Port_Window = __start__ - 0x20000000;
 
 /* Before everything else (and before any getenv): the window reserved, and the Switch has neither a terminal nor
    environment variables.

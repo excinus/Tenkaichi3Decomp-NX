@@ -51,7 +51,8 @@ def link_nx(objs, extra):
     """The Switch: devkitA64's linker with libnx, NOT position-independent (port/switch/nx.specs: libnx's own specs
     without -pie), the program at the window + 0x20000000 (__start__, where libnx's linker script begins). The
     game's main() wrapped as on Linux (plat_mem.c); --wrap=Progress_Main and --defsym are done by macwin.py, as on
-    macOS. The result is an ELF that the launcher loads at that address (docs/port/switch_plan.md)."""
+    macOS. The result is an ELF that the launcher loads at that address or, moved by a multiple of 4 GB, into
+    another window (its relocations kept for nx_reloc.py; docs/port/switch_plan.md)."""
     dyn = B / "obj_nx64_dynamic.o"
     r = subprocess.run([dkp("gcc")] + NX_ARCH + ["-c", str(ROOT / "port/switch/nx_dynamic.s"), "-o", str(dyn)], capture_output=True, text=True)
     if r.returncode:
@@ -61,7 +62,8 @@ def link_nx(objs, extra):
     cmd = [dkp("gcc"), f"-specs={ROOT / 'port/switch/nx.specs'}"] + NX_ARCH + ["-w", "-o", str(EXE)] + extra + objs + [str(dyn)] + \
           ([f"-L{sdl3() / 'lib'}", "-lSDL3"] if sdl3() else []) + \
           [f"-L{DEVKITPRO}/portlibs/switch/lib", f"-L{DEVKITPRO}/libnx/lib", "-lstdc++", "-lnx", "-lm",
-           f"-Wl,--defsym=__start__={NX_WINDOW + 0x20000000:#x}", "-Wl,--wrap=main", f"-Wl,-Map={EXE}.map"]
+           f"-Wl,--defsym=__start__={NX_WINDOW + 0x20000000:#x}", "-Wl,--wrap=main", f"-Wl,-Map={EXE}.map",
+           "-Wl,--emit-relocs"]  # (kept for nx_reloc.py: the launcher may load the program into another window)
     argsfile = B / "link_nx64.rsp"
     argsfile.write_text("\n".join('"' + a + '"' for a in cmd[1:]))
     return subprocess.run([cmd[0], "@" + str(argsfile)], capture_output=True, text=True, env=env)
@@ -118,6 +120,12 @@ def main():
     if r.returncode == 0 and (DATA / "SKELETON").exists():
         # built from the blank data tables: the program needs the list of where their values are on the user's disc
         d = subprocess.run([sys.executable, str(ROOT / "port/tools/make_dat.py")], capture_output=True, text=True)
+        print((d.stdout + d.stderr).strip()[-300:])
+        if d.returncode:
+            sys.exit(1)
+    if r.returncode == 0 and NX:
+        # the Switch: what the launcher moves when it loads the program into another window (nx_reloc.py)
+        d = subprocess.run([sys.executable, str(ROOT / "port/tools/nx_reloc.py")], capture_output=True, text=True)
         print((d.stdout + d.stderr).strip()[-300:])
         if d.returncode:
             sys.exit(1)

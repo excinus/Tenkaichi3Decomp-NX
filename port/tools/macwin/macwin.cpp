@@ -74,10 +74,15 @@ cl::opt<bool> PortModule("bt3-port", cl::desc("a port source, not the game's"), 
 // likewise, and the call is a fixed-argument one when the definition is.
 cl::opt<std::string> Defs("bt3-defs", cl::desc("write this module's function definitions to FILE, change nothing"), cl::init(""));
 cl::opt<std::string> Sigs("bt3-sigs", cl::desc("the program's function definitions (FILE from -bt3-defs)"), cl::init(""));
-// The Switch build (BT3_CC=nx64, docs/port/switch_plan.md): the window is at a fixed address and the program is linked
-// at it + 0x20000000 (not position-independent), so W in constant data is that number, not _mh_execute_header's
-// place. A 4-byte pointer in data is then `.word g - W`, which GNU ld resolves. Code still loads Port_Window.
-cl::opt<uint64_t> WindowBase("bt3-window-base", cl::desc("W as a fixed address (ELF; default: from _mh_execute_header)"), cl::init(0));
+// The Switch build (BT3_CC=nx64, docs/port/switch_plan.md): ELF, where a constant in data cannot be the difference of
+// two symbols in different sections (Mach-O's subtractor relocations can). The program is linked at a window W0 =
+// this value (+ 0x20000000) and the launcher may load it into another 4 GB window, moving it as a whole. So:
+//   - in data (global initializers), W is the number W0: a 4-byte pointer is `.word g - W0`, a window offset, which
+//     is the same wherever the program is loaded (the program and its window move together);
+//   - in code, W is the program's own start less 0x20000000 (`__start__`, libnx's linker script), reached
+//     PC-relatively, as on macOS: nothing in the code depends on where the program is.
+// The 8-byte pointers in data are moved by the launcher (port/tools/nx_reloc.py lists them).
+cl::opt<uint64_t> WindowBase("bt3-window-base", cl::desc("W0 for data, ELF (default: W from _mh_execute_header everywhere)"), cl::init(0));
 
 constexpr unsigned GAME = 271; // __ptr32 __uptr: the game's 4-byte pointers
 constexpr unsigned HOST64 = 272; // __ptr64: ordinary 64-bit pointers (ptr32.py uses them for variadic arguments)
@@ -88,9 +93,10 @@ struct Window {
     LLVMContext &Ctx;
     Type *I64, *I32, *I8;
     PointerType *Host, *Game;
-    Constant *W = nullptr;
+    Constant *W = nullptr, *WData = nullptr;
+    bool InData = false; // fixing a global's initializer (-bt3-window-base: W is the number there)
     std::map<Function *, Value *> WIn; // per function: the base loaded from Port_Window
-    std::map<Constant *, Constant *> Done;
+    std::map<Constant *, Constant *> Done, DoneData;
     std::map<Constant *, Constant *> HostOf; // a 4-byte pointer constant made from a host address -> that address
     bool Failed = false;
 
@@ -98,14 +104,24 @@ struct Window {
         : M(M), Ctx(M.getContext()), I64(Type::getInt64Ty(Ctx)), I32(Type::getInt32Ty(Ctx)), I8(Type::getInt8Ty(Ctx)),
           Host(PointerType::get(Ctx, 0)), Game(PointerType::get(Ctx, GAME)) {}
 
+    // W for an offset (p - W): in data under -bt3-window-base the number W0, otherwise windowAt()
     Constant *window() {
-        if (!W && WindowBase != 0) {
-            W = ConstantExpr::getIntToPtr(ConstantInt::get(I64, WindowBase), Host);
+        if (InData && WindowBase != 0) {
+            if (!WData) {
+                WData = ConstantExpr::getIntToPtr(ConstantInt::get(I64, WindowBase), Host);
+            }
+            return WData;
         }
+        return windowAt();
+    }
+    // W as the program's first byte less 0x20000000: for addresses made from W (W + offset), which move with the
+    // program, and for everything in code
+    Constant *windowAt() {
         if (!W) {
-            GlobalVariable *mh = M.getGlobalVariable("_mh_execute_header");
+            const char *start = WindowBase != 0 ? "__start__" : "_mh_execute_header"; // (the program's first byte)
+            GlobalVariable *mh = M.getGlobalVariable(start);
             if (!mh) {
-                mh = new GlobalVariable(M, I8, true, GlobalValue::ExternalLinkage, nullptr, "_mh_execute_header");
+                mh = new GlobalVariable(M, I8, true, GlobalValue::ExternalLinkage, nullptr, start);
                 mh->setVisibility(GlobalValue::HiddenVisibility);
                 mh->setDSOLocal(true);
             }
@@ -128,7 +144,7 @@ struct Window {
         if (known != HostOf.end()) { // W + (p - W): p itself
             return To->getAddressSpace() == 0 ? known->second : ConstantExpr::getAddrSpaceCast(known->second, To);
         }
-        Constant *p = ConstantExpr::getGetElementPtr(I8, window(), ConstantExpr::getPtrToInt(off, I64));
+        Constant *p = ConstantExpr::getGetElementPtr(I8, windowAt(), ConstantExpr::getPtrToInt(off, I64));
         return To->getAddressSpace() == 0 ? p : ConstantExpr::getAddrSpaceCast(p, To);
     }
     Constant *gameC(Constant *p) { // a host address constant as a 4-byte pointer
@@ -147,6 +163,7 @@ struct Window {
         if (isa<GlobalValue>(C) || isa<ConstantData>(C)) {
             return C;
         }
+        std::map<Constant *, Constant *> &Done = InData ? DoneData : this->Done;
         auto it = Done.find(C);
         if (it != Done.end()) {
             return it->second;
@@ -608,7 +625,7 @@ struct Window {
             GlobalVariable *g = M.getGlobalVariable(a.substr(0, eq), true);
             if (g && g->isDeclaration()) {
                 uint64_t addr = std::stoull(a.substr(eq + 1), nullptr, 0);
-                g->replaceAllUsesWith(ConstantExpr::getGetElementPtr(I8, window(), ConstantInt::get(I64, addr)));
+                g->replaceAllUsesWith(ConstantExpr::getGetElementPtr(I8, windowAt(), ConstantInt::get(I64, addr)));
                 g->eraseFromParent();
             }
         }
@@ -657,6 +674,7 @@ struct Window {
                 fixCall(CI);
             }
         }
+        InData = true;
         for (GlobalVariable &G : M.globals()) {
             if (G.hasInitializer()) {
                 Constant *f = fixC(G.getInitializer());
@@ -665,6 +683,7 @@ struct Window {
                 }
             }
         }
+        InData = false;
         std::map<std::string, std::string> db;
         if (!Sigs.empty()) {
             auto buf = MemoryBuffer::getFile(Sigs);

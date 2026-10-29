@@ -31,7 +31,7 @@ MAC_TRIPLE = "arm64-apple-macos11"
 NX_TRIPLE = "aarch64-none-elf"
 # The Switch's window: a fixed place in the 512 GB address space (the launcher maps the PS2's regions at
 # NX_WINDOW + their addresses and loads the program at NX_WINDOW + 0x20000000; the spike found it free every time)
-NX_WINDOW = 0x4000000000
+NX_WINDOW = int(os.environ.get("BT3_NX_WINDOW", "0x4000000000"), 0)  # (BT3_NX_WINDOW: another, to test nx_reloc.py)
 DEVKITPRO = pathlib.Path(os.environ.get("DEVKITPRO", "/opt/devkitpro")) if NX else None
 
 def _llvm_dir():

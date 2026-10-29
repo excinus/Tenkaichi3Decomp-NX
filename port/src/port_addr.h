@@ -19,9 +19,10 @@
 #include <mach-o/ldsyms.h> /* _mh_execute_header: the program's first byte */
 #define PORT_WINDOW ((uintptr_t)&_mh_execute_header - 0x20000000u)
 #else
-/* The Switch: the window at a fixed place in the address space, where the launcher loads the program (at
-   + 0x20000000); the same number as NX_WINDOW in port/tools/toolchain.py (docs/port/switch_plan.md). */
-#define PORT_WINDOW ((uintptr_t)0x4000000000ull)
+/* The Switch: the 4 GB window the launcher chose and loaded the program into (at + 0x20000000), found by the program
+   from where it is (Port_Window, plat_mem.c; docs/port/switch_plan.md). */
+extern void *Port_Window;
+#define PORT_WINDOW ((uintptr_t)Port_Window)
 #endif
 static inline void *Port_Ptr(uint32_t addr) {
     return addr != 0 ? (void *)(PORT_WINDOW + addr) : (void *)0;

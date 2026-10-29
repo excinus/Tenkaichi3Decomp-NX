@@ -8,9 +8,11 @@
  * followed here):
  *
  *   1. finds the game's folder: next to this launcher, or the title's folder sdmc:/atmosphere/contents/<title>/;
- *   2. checks that the window is free (the system places some of its regions anew at every start);
- *   3. maps the program's segments (an ELF: `Tenkaichi3Decomp`) at their addresses with svcMapProcessCodeMemory and
- *      svcSetProcessMemoryPermission, from memory of this process's heap;
+ *   2. chooses a free 4 GB window: the one the program was linked for, or another when the system has put one of its
+ *      regions there this time (it places them anew at every start);
+ *   3. maps the program's segments (an ELF: `Tenkaichi3Decomp`) with svcMapProcessCodeMemory and
+ *      svcSetProcessMemoryPermission, from memory of this process's heap, moved with their window as a whole: the
+ *      8-byte addresses <program>.rel lists are moved with them (port/tools/nx_reloc.py), the rest needs nothing;
  *   4. gives the system's services back (the game opens its own), starts the program with the homebrew ABI (its
  *      heap: the rest of this process's heap; the process handle; the allowed calls; argv[0], its own path, which
  *      makes the game's folder its working folder), and when it ends takes the services again and shows how it ended
@@ -28,7 +30,7 @@
 
 #define TITLE_FOLDER "sdmc:/atmosphere/contents/0100B73DEC000000"
 #define PROGRAM "Tenkaichi3Decomp"
-#define WINDOW 0x4000000000ull /* port/src/port_addr.h PORT_WINDOW, port/tools/toolchain.py NX_WINDOW */
+#define WINDOW 0x4000000000ull /* the window programs are linked for (port/tools/toolchain.py NX_WINDOW): tried first */
 #define GB4 0x100000000ull
 #define LAUNCHER_HEAP 0x1000000ull  /* this program's own C heap (the console's picture is the most of it) */
 #define PATH_SIZE (FS_MAX_PATH + 64) /* a folder of FS_MAX_PATH and a name in it */
@@ -195,39 +197,120 @@ static int sSegCount;
 static uint64_t sGameHeap, sGameHeapSize;
 uint64_t gLauncherEntry; /* while the program runs: its start, where exceptions are sent (trampoline.s) */
 
-/* Free from the window's start to its end: nothing mapped there, and none of the regions the system keeps for the
-   heap, the alias mappings and the stacks (it refuses code mappings in those even where nothing is mapped). */
-static int clear_of(uint32_t idAddr, uint32_t idSize) {
+/* Whether the 4 GB window at w is free from its start to its end: nothing mapped there, and none of the regions the
+   system keeps for the heap, the alias mappings and the stacks (it refuses code mappings in those even where
+   nothing is mapped). */
+static int clear_of(uint64_t w, uint32_t idAddr, uint32_t idSize) {
     uint64_t a = 0, n = 0;
     svcGetInfo(&a, idAddr, CUR_PROCESS_HANDLE, 0);
     svcGetInfo(&n, idSize, CUR_PROCESS_HANDLE, 0);
-    return n == 0 || WINDOW + GB4 <= a || WINDOW >= a + n;
+    return n == 0 || w + GB4 <= a || w >= a + n;
 }
 
-static int window_free(void) {
+static int window_free(uint64_t w) {
     MemoryInfo mi;
     u32 pi;
 
-    if (!clear_of(InfoType_HeapRegionAddress, InfoType_HeapRegionSize) ||
-        !clear_of(InfoType_AliasRegionAddress, InfoType_AliasRegionSize) ||
-        !clear_of(InfoType_StackRegionAddress, InfoType_StackRegionSize)) {
+    if (!clear_of(w, InfoType_HeapRegionAddress, InfoType_HeapRegionSize) ||
+        !clear_of(w, InfoType_AliasRegionAddress, InfoType_AliasRegionSize) ||
+        !clear_of(w, InfoType_StackRegionAddress, InfoType_StackRegionSize)) {
         return 0;
     }
-    if (R_FAILED(svcQueryMemory(&mi, &pi, WINDOW))) {
+    if (R_FAILED(svcQueryMemory(&mi, &pi, w))) {
         return 0;
     }
-    return mi.type == MemType_Unmapped && mi.addr + mi.size >= WINDOW + GB4;
+    return mi.type == MemType_Unmapped && mi.addr + mi.size >= w + GB4;
 }
 
-/* Maps the program's segments. 0, or what went wrong. */
-static const char *load(const char *path, Handle self, uint64_t *entry) {
-    FILE *f = fopen(path, "rb");
+/* The window the program goes into: the one it was linked for if it is free (the system places some of its regions
+   anew at every start, and may have put one there), else the first free one in the address space. The program and
+   its window are moved together by a multiple of 4 GB (the list of what moves with it: <program>.rel). 0: none. */
+static uint64_t choose_window(void) {
+    uint64_t start = 0, size = 0, w;
+
+    if (window_free(WINDOW)) {
+        return WINDOW;
+    }
+    svcGetInfo(&start, InfoType_AslrRegionAddress, CUR_PROCESS_HANDLE, 0);
+    svcGetInfo(&size, InfoType_AslrRegionSize, CUR_PROCESS_HANDLE, 0);
+    for (w = (start + GB4 - 1) & ~(GB4 - 1); w + GB4 <= start + size; w += GB4) {
+        if (w != 0 && window_free(w)) {
+            return w;
+        }
+    }
+    return 0;
+}
+
+/* The address space as the system has laid it out this time (when no window is free) */
+static void show_layout(void) {
+    static const struct { const char *what; uint32_t a, n; } kRegions[] = {
+        {"address space", InfoType_AslrRegionAddress, InfoType_AslrRegionSize},
+        {"heap region", InfoType_HeapRegionAddress, InfoType_HeapRegionSize},
+        {"alias region", InfoType_AliasRegionAddress, InfoType_AliasRegionSize},
+        {"stack region", InfoType_StackRegionAddress, InfoType_StackRegionSize},
+    };
+    MemoryInfo mi;
+    u32 pi;
+    unsigned i;
+
+    for (i = 0; i < sizeof(kRegions) / sizeof(kRegions[0]); i++) {
+        uint64_t a = 0, n = 0;
+        svcGetInfo(&a, kRegions[i].a, CUR_PROCESS_HANDLE, 0);
+        svcGetInfo(&n, kRegions[i].n, CUR_PROCESS_HANDLE, 0);
+        printf("  %-14s %#" PRIx64 " + %#" PRIx64 "\n", kRegions[i].what, a, n);
+    }
+    if (R_SUCCEEDED(svcQueryMemory(&mi, &pi, WINDOW))) {
+        printf("  at %#llx: type %#x, %#" PRIx64 " + %#" PRIx64 "\n", (unsigned long long)WINDOW, mi.type, mi.addr, mi.size);
+    }
+}
+
+/* <program>.rel (port/tools/nx_reloc.py): the window the program was linked for, and the offsets in it of the 8-byte
+   addresses that move with the program. */
+static uint64_t sLinkedWindow;
+static uint32_t *sRel;
+static uint32_t sRelCount;
+
+static const char *read_rel(const char *path) {
+    char name[PATH_SIZE + 8];
+    FILE *f;
+    struct {
+        char magic[4];
+        uint32_t version;
+        uint64_t window;
+        uint32_t count;
+    } __attribute__((packed)) h;
+
+    snprintf(name, sizeof(name), "%s.rel", path);
+    f = fopen(name, "rb");
+    if (f == NULL) {
+        return "its list Tenkaichi3Decomp.rel is missing (copy all the files of the game)";
+    }
+    if (fread(&h, sizeof(h), 1, f) != 1 || memcmp(h.magic, "BT3R", 4) != 0 || h.version != 1 || h.count > 0x1000000 ||
+        (sRel = malloc((size_t)h.count * 4 + 4)) == NULL || fread(sRel, 4, h.count, f) != h.count) {
+        fclose(f);
+        return "its list Tenkaichi3Decomp.rel is damaged";
+    }
+    fclose(f);
+    sLinkedWindow = h.window;
+    sRelCount = h.count;
+    return NULL;
+}
+
+/* Maps the program's segments into the window `w`, moved from the window it was linked for. 0, or what went wrong. */
+static const char *load(const char *path, Handle self, uint64_t w, uint64_t *entry) {
+    FILE *f;
     ElfHeader h;
     ElfSegment seg[16];
     uint8_t *cursor = sBig;
-    uint64_t end = 0;
+    uint64_t end = 0, delta;
+    const char *why = read_rel(path);
     int i;
 
+    if (why != NULL) {
+        return why;
+    }
+    delta = w - sLinkedWindow;
+    f = fopen(path, "rb");
     if (f == NULL) {
         return "it cannot be opened";
     }
@@ -238,19 +321,21 @@ static const char *load(const char *path, Handle self, uint64_t *entry) {
         return "it is not the Switch's program of Tenkaichi3Decomp (an ELF for AArch64)";
     }
     for (i = 0; i < h.phnum; i++) {
-        uint64_t dst, pad, size, perm;
+        uint64_t link, dst, pad, size, perm;
+        uint32_t k;
         Result rc;
 
         if (seg[i].type != 1 /* PT_LOAD */ || seg[i].memsz == 0) {
             continue;
         }
-        dst = seg[i].vaddr & ~0xFFFull;
-        pad = seg[i].vaddr - dst;
+        link = seg[i].vaddr & ~0xFFFull; /* where the link put it */
+        pad = seg[i].vaddr - link;
         size = (pad + seg[i].memsz + 0xFFF) & ~0xFFFull;
-        if (seg[i].filesz > seg[i].memsz || dst < WINDOW + 0x20000000ull || dst + size > WINDOW + GB4 || dst < end ||
-            sSegCount == (int)(sizeof(sSegs) / sizeof(sSegs[0]))) {
+        dst = link + delta;
+        if (seg[i].filesz > seg[i].memsz || link < sLinkedWindow + 0x20000000ull || link + size > sLinkedWindow + GB4 ||
+            dst < end || sSegCount == (int)(sizeof(sSegs) / sizeof(sSegs[0]))) {
             fclose(f);
-            return "its segments are not where this launcher expects them (another build of the launcher?)";
+            return "its segments are not where its list says (are the program and Tenkaichi3Decomp.rel of one release?)";
         }
         if ((uint64_t)(cursor - sBig) + size + MIN_GAME_HEAP > sBigSize) {
             fclose(f);
@@ -260,6 +345,15 @@ static const char *load(const char *path, Handle self, uint64_t *entry) {
         if (fseek(f, (long)seg[i].offset, SEEK_SET) != 0 || fread(cursor + pad, 1, seg[i].filesz, f) != seg[i].filesz) {
             fclose(f);
             return "it could not be read whole";
+        }
+        for (k = 0; k < sRelCount; k++) { /* its addresses into the window it goes to */
+            uint64_t at = sLinkedWindow + sRel[k];
+            if (at >= link && at + 8 <= link + size) {
+                uint64_t v;
+                memcpy(&v, cursor + (at - link), 8);
+                v += delta;
+                memcpy(cursor + (at - link), &v, 8);
+            }
         }
         armDCacheFlush(cursor, size);
         perm = (seg[i].flags & 1) ? Perm_Rx : (seg[i].flags & 2) ? Perm_Rw : Perm_R;
@@ -272,10 +366,10 @@ static const char *load(const char *path, Handle self, uint64_t *entry) {
             rc = svcSetProcessMemoryPermission(self, dst, size, perm);
         }
         if (R_FAILED(rc)) {
-            static char why[96];
+            static char msg[96];
             fclose(f);
-            snprintf(why, sizeof(why), "a segment could not be mapped at %#" PRIx64 " (result %#x)", dst, rc);
-            return why;
+            snprintf(msg, sizeof(msg), "a segment could not be mapped at %#" PRIx64 " (result %#x)", dst, rc);
+            return msg;
         }
         if (perm == Perm_Rx) {
             armICacheInvalidate((void *)(uintptr_t)dst, size);
@@ -284,10 +378,10 @@ static const char *load(const char *path, Handle self, uint64_t *entry) {
         end = dst + size;
     }
     fclose(f);
-    if (sSegCount == 0 || h.entry != sSegs[0].dst) {
+    if (sSegCount == 0 || h.entry + delta != sSegs[0].dst) {
         return "it has no start where its code begins";
     }
-    *entry = h.entry;
+    *entry = h.entry + delta;
     sGameHeap = (uint64_t)(uintptr_t)cursor;
     sGameHeapSize = sBigSize - (uint64_t)(cursor - sBig);
     return NULL;
@@ -377,7 +471,7 @@ static int find_game(int argc, char **argv, char *folder, size_t size) {
 int main(int argc, char **argv) {
     char folder[FS_MAX_PATH], path[PATH_SIZE];
     const char *why;
-    uint64_t entry = 0, t0;
+    uint64_t entry = 0, window, t0;
     Handle self;
     int r;
 
@@ -395,14 +489,21 @@ int main(int argc, char **argv) {
         return fail("This launcher may not map memory here (no process handle or system calls).\n"
                     "Start it from the homebrew menu of Atmosphere.\n");
     }
-    if (!window_free()) {
-        return fail("The game's memory window (%#llx, 4 GB) is in use by the system this time.\n"
-                    "Start it again: the system places its regions anew at every start.\n", (unsigned long long)WINDOW);
+    window = choose_window();
+    if (window == 0) {
+        printf("\n" CONSOLE_RED "Cannot start the game." CONSOLE_RESET "\n"
+               "No 4 GB window of the address space is free for the game's memory. The address space:\n");
+        show_layout();
+        printf("(A game with a small address space, 64 GB, cannot hold it: start the homebrew menu through\n"
+               "another game, holding R. Please send a photo of this screen.)\n");
+        wait_plus();
+        return 1;
     }
+    printf("Window: %#" PRIx64 "%s\n", window, window == WINDOW ? "" : " (the usual one was in use this time)");
     virtmemLock();
-    virtmemAddReservation((void *)WINDOW, GB4);
+    virtmemAddReservation((void *)window, GB4);
     virtmemUnlock();
-    why = load(path, self, &entry);
+    why = load(path, self, window, &entry);
     if (why != NULL) {
         return fail("%s: %s.\n", path, why);
     }

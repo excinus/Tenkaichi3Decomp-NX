@@ -1,18 +1,18 @@
 #!/bin/sh
 # The Switch test kit of phase 3 (docs/port/switch_plan.md): the game's program for the Switch (port/build/bt3_nx,
-# BT3_CC=nx64), its lists, the launcher (port/switch/launcher/build.sh) and a bt3_env.txt that runs the game's demo
+# BT3_CC=nx64), its lists (.dat, .mem, .rel), the launcher (port/switch/launcher/build.sh) and a bt3_env.txt that runs the game's demo
 # fight without a picture and logs the fight's state, with the instructions  ->  port/build/switch/test-kit/
 # Needs devkitA64's strip (DEVKITPRO, default /opt/devkitpro).
 cd "$(dirname "$0")/../.." || exit 1
 : "${DEVKITPRO:=/opt/devkitpro}"
 K=port/build/switch/test-kit
 T=$K/atmosphere/contents/0100B73DEC000000
-for f in port/build/bt3_nx port/build/bt3_nx.dat port/build/bt3_nx.mem port/build/switch/Tenkaichi3Decomp.nro; do
+for f in port/build/bt3_nx port/build/bt3_nx.dat port/build/bt3_nx.mem port/build/bt3_nx.rel port/build/switch/Tenkaichi3Decomp.nro; do
     [ -f "$f" ] || { echo "missing $f (build the game with BT3_CC=nx64 and the launcher first)"; exit 1; }
 done
 rm -rf $K && mkdir -p $T $K/switch || exit 1
 $DEVKITPRO/devkitA64/bin/aarch64-none-elf-strip -o $T/Tenkaichi3Decomp port/build/bt3_nx || exit 1
-cp port/build/bt3_nx.dat $T/Tenkaichi3Decomp.dat && cp port/build/bt3_nx.mem $T/Tenkaichi3Decomp.mem || exit 1
+cp port/build/bt3_nx.dat $T/Tenkaichi3Decomp.dat && cp port/build/bt3_nx.mem $T/Tenkaichi3Decomp.mem && cp port/build/bt3_nx.rel $T/Tenkaichi3Decomp.rel || exit 1
 cp port/build/switch/Tenkaichi3Decomp.nro $K/switch/ || exit 1
 cat > $T/bt3_env.txt <<'ENV'
 # Settings for this test (port/src/plat_mem.c, nx_start): the game's demo fight without a picture, as the PC

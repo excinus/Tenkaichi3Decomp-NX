@@ -102,6 +102,7 @@ jobs:
             port/build/bt3_nx
             port/build/bt3_nx.dat
             port/build/bt3_nx.mem
+            port/build/bt3_nx.rel
             port/build/bt3_nx.map
           if-no-files-found: error
           retention-days: 14
