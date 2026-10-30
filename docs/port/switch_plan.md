@@ -791,3 +791,22 @@ the dock right. Split screen overclocked: 20 pictures a second, even. Changed:
   appletLockExit); the Video tab's "Overclock while playing (sys-clk)", on by default;
 - the game's button icons (boot file member 8) and the options screen's pack are written once beside the log
   (bt3_art_icons.bin, bt3_art_options.bin) for redrawing the icons with the Switch's letters.
+
+The kit of commit d7f66f1: the Nintendo layout right (on by default); a sideways Joy-Con's stick still not moving
+through the characters' choice or the pause menu; split screen with the GL thread no faster (left as a known issue:
+20 pictures a second overclocked); closing the game from HOME stuck on "closing" and then reported as a crash (the
+exit lock); the art files sent. Changed:
+- the game's button icons with the Switch's names (`port/switch/art/button_art.py`, `port/src/nx_button_art.h`,
+  `port/src/plat_nxart.c`): Triangle / Circle / Square / Cross X / A / Y / B on the game's own buttons (the symbol taken
+  off, the face filled from its own shading, a white letter drawn in the texture's own colours), L1 / L2 / R1 / R2 L / ZL
+  / R / ZR, L3 / R3 LS / RS, SELECT and START round - and + buttons; in the icons of the game's text (the boot file's
+  member 8: 20 of its 28 textures) and the controller page's two button sheets. Only the changed texels are kept,
+  with a hash of each texture as the USA disc has it, checked before it is changed; checked on the build machine
+  against the console's files (the C code's result equal to the generator's, texel for texel). The files are
+  written again only with BT3_ART_DUMP set;
+- sys-clk: GPU 921 MHz docked or on any charger, 614 MHz on the battery; no exit lock: the overrides are taken back
+  as soon as the game is not in front (an applet hook on the focus) and set again when it is back;
+- a sideways Joy-Con: SL is ZL (Charge Aura), SR R, the shoulder button L, the trigger ZR (the player's choice); a
+  controller that changes kind (a pair split by the Controllers screen) is put back as a new one, so its name, and
+  with it the stick as d-pad in the menus, is right;
+- the launcher's text screen only when something goes wrong (a normal start shows nothing before the game).

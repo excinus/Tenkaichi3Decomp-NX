@@ -11,9 +11,11 @@
    A single Joy-Con held sideways (two players on one pair, after the console's Controllers screen: the game's
    port/src/plat_nxpad.c) is turned here into the same pad: libnx reports its buttons by their names and its stick as
    held upright, so the four buttons under the thumb are read by where they are when it lies sideways (the bottom one
-   is B, the right one A...), the stick turned with it, SL and SR are L and R, the shoulder button and its trigger are
-   ZL and ZR, and its one of - and + is +. Should the system turn it already (a left one giving A, B, X or Y), what it
-   gives is taken as it is. */
+   is B, the right one A...), the stick turned with it, SL is ZL and SR is R (the game's Charge Aura and Ascend under
+   the fingers), its shoulder button is L and its trigger ZR, and its one of - and + is +: the player's choice,
+   2026-10-30. Should the system turn it already (a left one giving A, B, X or Y), what it gives is taken as it is.
+   When a slot's controller changes kind (a pair split in two by the Controllers screen, joined again) it is taken
+   off and put back as a new controller, so that SDL and the game see its name ("..., sideways") and buttons anew. */
 #include "SDL_internal.h"
 
 #ifdef SDL_JOYSTICK_SWITCH
@@ -30,6 +32,7 @@ typedef struct
 {
     PadState pad;
     SDL_JoystickID id; /* 0 while nothing is connected there */
+    u32 style;         /* the kind of controller it was put in as (padGetStyleSet) */
     HidVibrationDeviceHandle vibration[2];
     int vibrationReady;
 } Slot;
@@ -74,14 +77,18 @@ static void SWITCH_JoystickDetect(void)
     int i;
 
     for (i = 0; i < MAX_PADS; i++) {
+        u32 style;
         padUpdate(&sSlot[i].pad);
+        style = padGetStyleSet(&sSlot[i].pad);
+        if (sSlot[i].id != 0 && (!padIsConnected(&sSlot[i].pad) || style != sSlot[i].style)) {
+            SDL_PrivateJoystickRemoved(sSlot[i].id); /* (gone, or another kind now: put back below as a new one) */
+            sSlot[i].id = 0;
+        }
         if (padIsConnected(&sSlot[i].pad) && sSlot[i].id == 0) {
             sSlot[i].id = SDL_GetNextObjectID();
+            sSlot[i].style = style;
             sSlot[i].vibrationReady = 0;
             SDL_PrivateJoystickAdded(sSlot[i].id);
-        } else if (!padIsConnected(&sSlot[i].pad) && sSlot[i].id != 0) {
-            SDL_PrivateJoystickRemoved(sSlot[i].id);
-            sSlot[i].id = 0;
         }
     }
 }
@@ -257,23 +264,23 @@ static void SWITCH_JoystickUpdate(SDL_Joystick *joystick)
     }
     if (single == 1 && !sSystemTurns) {
         /* the left one sideways (its rail up, the stick on the left): the buttons turned a quarter to the left */
-        buttons = MOVE(15, 0) | MOVE(12, 1) | MOVE(14, 2) | MOVE(13, 3) | MOVE(4, 4) | MOVE(24, 6) | MOVE(25, 7) |
-                  MOVE(6, 8) | MOVE(8, 9) | MOVE(11, 10);
+        buttons = MOVE(15, 0) | MOVE(12, 1) | MOVE(14, 2) | MOVE(13, 3) | MOVE(4, 4) | MOVE(24, 8) | MOVE(25, 7) |
+                  MOVE(6, 6) | MOVE(8, 9) | MOVE(11, 10);
         r.x = -l.y; /* (r: the turned stick, for the moment) */
         r.y = l.x;
         l = r;
         r.x = r.y = 0;
     } else if (single == 2 && !sSystemTurns) {
         /* the right one sideways (its rail up, the stick on the left): the buttons turned a quarter to the right */
-        buttons = MOVE(2, 0) | MOVE(0, 1) | MOVE(3, 2) | MOVE(1, 3) | MOVE(5, 4) | MOVE(26, 6) | MOVE(27, 7) |
-                  MOVE(7, 8) | MOVE(9, 9) | MOVE(10, 10);
+        buttons = MOVE(2, 0) | MOVE(0, 1) | MOVE(3, 2) | MOVE(1, 3) | MOVE(5, 4) | MOVE(26, 8) | MOVE(27, 7) |
+                  MOVE(7, 6) | MOVE(9, 9) | MOVE(10, 10);
         l.x = r.y;
         l.y = -r.x;
         r.x = r.y = 0;
     } else if (single == 1) {
-        buttons |= MOVE(24, 6) | MOVE(25, 7) | MOVE(11, 10); /* (turned by the system: SL / SR still to be L / R) */
+        buttons = (raw & ~(u64)(1 << 6 | 1 << 8)) | MOVE(24, 8) | MOVE(25, 7) | MOVE(6, 6) | MOVE(8, 9) | MOVE(11, 10); /* (turned by the system) */
     } else if (single == 2) {
-        buttons |= MOVE(26, 6) | MOVE(27, 7);
+        buttons = (raw & ~(u64)(1 << 7 | 1 << 9)) | MOVE(26, 8) | MOVE(27, 7) | MOVE(7, 6) | MOVE(9, 9);
         l = r; /* (its stick is the right one's) */
         r.x = r.y = 0;
     }

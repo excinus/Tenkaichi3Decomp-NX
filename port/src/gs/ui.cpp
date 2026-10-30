@@ -1422,8 +1422,9 @@ static void video_tab(PortVideo &v) {
         }
         ImGui::EndDisabled();
         ImGui::SetItemTooltip(Port_NxClockThere() ?
-                              "CPU 1785 MHz, memory 1600 MHz and in the hand GPU 614 MHz while the game runs, back to\n"
-                              "sys-clk's own when it ends. Fights need it for a steady 30 pictures a second. On by default." :
+                              "CPU 1785 MHz and memory 1600 MHz while the game runs, the GPU at 921 MHz docked or charging\n"
+                              "and 614 MHz on the battery; sys-clk's own again in the HOME menu and when the game ends.\n"
+                              "Fights need it for a steady 30 pictures a second. On by default." :
                               "sys-clk is not installed: the game runs at the stock clocks (fights at 16 to 20 pictures\n"
                               "a second). With sys-clk the game sets the clocks it needs by itself.");
     }

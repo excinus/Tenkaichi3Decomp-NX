@@ -111,15 +111,40 @@ static Handle own_process(void) {
 /* ---- the screen ------------------------------------------------------------------------------------------- */
 
 static PadState sPad;
+static int sScreen; /* the launcher's text screen is up: only for what goes wrong (a normal start shows nothing) */
 
 static void screen_open(void) {
+    if (sScreen) {
+        return;
+    }
     consoleInit(NULL);
     padConfigureInput(1, HidNpadStyleSet_NpadStandard);
     padInitializeDefault(&sPad);
+    sScreen = 1;
+}
+
+static void screen_close(void) {
+    if (sScreen) {
+        consoleExit(NULL);
+        sScreen = 0;
+    }
+}
+
+/* A line of the launcher's progress: on its screen when it is up (something went wrong), else nowhere. */
+static void say(const char *fmt, ...) {
+    va_list ap;
+    if (!sScreen) {
+        return;
+    }
+    va_start(ap, fmt);
+    vprintf(fmt, ap);
+    va_end(ap);
+    consoleUpdate(NULL);
 }
 
 /* Waits for + (then the launcher ends: back to the homebrew menu or the HOME menu). */
 static void wait_plus(void) {
+    screen_open();
     printf("\nPress + to exit.\n");
     consoleUpdate(NULL);
     while (appletMainLoop()) {
@@ -129,12 +154,13 @@ static void wait_plus(void) {
         }
         consoleUpdate(NULL);
     }
-    consoleExit(NULL);
+    screen_close();
 }
 
 static int fail(const char *fmt, ...) {
     va_list ap;
 
+    screen_open();
     printf("\n" CONSOLE_RED "Cannot start the game." CONSOLE_RESET "\n");
     va_start(ap, fmt);
     vprintf(fmt, ap);
@@ -437,14 +463,13 @@ static int run(Handle self, uint64_t entry) {
        this program's are closed, its thread data kept aside (the program's libnx writes its own there), and both
        come back afterwards. */
     memcpy(sSavedTls, (u8 *)armGetTls() + 0x100, sizeof(sSavedTls));
-    consoleExit(NULL);
+    screen_close();
     __appExit();
     gLauncherEntry = entry;
     r = Launcher_Call(e, (uint64_t)-1, entry);
     gLauncherEntry = 0;
     memcpy((u8 *)armGetTls() + 0x100, sSavedTls, sizeof(sSavedTls));
     __appInit();
-    screen_open();
     return r;
 }
 
@@ -500,6 +525,7 @@ static int crash_notice(const char *folder) {
     if (f == NULL) {
         return 1;
     }
+    screen_open();
     printf(CONSOLE_RED "The game crashed the last time." CONSOLE_RESET " Its report (%s):\n\n", path);
     while (n++ < 12 && fgets(line, sizeof(line), f) != NULL) {
         printf("  %s", line);
@@ -512,7 +538,7 @@ static int crash_notice(const char *folder) {
         padUpdate(&sPad);
         down = padGetButtonsDown(&sPad);
         if (down & HidNpadButton_Plus) {
-            consoleExit(NULL);
+            screen_close();
             return 0;
         }
         if (down & HidNpadButton_A) {
@@ -534,9 +560,6 @@ int main(int argc, char **argv) {
     Handle self;
     int r;
 
-    screen_open();
-    printf(CONSOLE_YELLOW "Tenkaichi3Decomp" CONSOLE_RESET " - launcher\n\n");
-    consoleUpdate(NULL);
     if (!find_game(argc, argv, folder, sizeof(folder))) {
         return fail("The game's program was not found. It is looked for:\n"
                     "  next to this launcher, as " PROGRAM ",\n  and as " TITLE_FOLDER "/" PROGRAM "\n"
@@ -546,7 +569,7 @@ int main(int argc, char **argv) {
         return 0;
     }
     snprintf(path, sizeof(path), "%s/" PROGRAM, folder);
-    printf("Game: %s\n", path);
+    say("Game: %s\n", path);
     self = own_process();
     if (self == INVALID_HANDLE || !envIsSyscallHinted(0x77) || !envIsSyscallHinted(0x73)) {
         return fail("This launcher may not map memory here (no process handle or system calls).\n"
@@ -554,6 +577,7 @@ int main(int argc, char **argv) {
     }
     window = choose_window();
     if (window == 0) {
+        screen_open();
         printf("\n" CONSOLE_RED "Cannot start the game." CONSOLE_RESET "\n"
                "No 4 GB window of the address space is free for the game's memory. The address space:\n");
         show_layout();
@@ -562,9 +586,8 @@ int main(int argc, char **argv) {
         wait_plus();
         return 1;
     }
-    printf("Window: %#" PRIx64 "%s\n", window, window == WINDOW ? "" : " (the usual one was in use this time)");
-    printf("Loading the game...\n");
-    consoleUpdate(NULL);
+    say("Window: %#" PRIx64 "%s\n", window, window == WINDOW ? "" : " (the usual one was in use this time)");
+    say("Loading the game...\n");
     t0 = armGetSystemTick();
     virtmemLock();
     virtmemAddReservation((void *)window, GB4);
@@ -574,18 +597,17 @@ int main(int argc, char **argv) {
         return fail("%s: %s.\n", path, why);
     }
     snprintf(sArgv, sizeof(sArgv), "\"%s\"", path);
-    printf("Loaded at %#" PRIx64 " (%d segments) in %" PRIu64 " ms; %" PRIu64 " MB for the game.\n", entry, sSegCount,
-           (uint64_t)(armTicksToNs(armGetSystemTick() - t0) / 1000000u), sGameHeapSize >> 20);
-    printf("\nThe game runs now. Its output goes to bt3_log.txt in its folder, and what it is doing to\n"
-           "bt3_watch.txt.\n");
-    consoleUpdate(NULL);
+    say("Loaded at %#" PRIx64 " (%d segments) in %" PRIu64 " ms; %" PRIu64 " MB for the game.\n", entry, sSegCount,
+        (uint64_t)(armTicksToNs(armGetSystemTick() - t0) / 1000000u), sGameHeapSize >> 20);
+    say("\nThe game runs now. Its output goes to bt3_log.txt in its folder, and what it is doing to\n"
+        "bt3_watch.txt.\n");
 
     t0 = armGetSystemTick();
     r = run(self, entry);
     if (r == 0 && !test_run(folder)) {
-        consoleExit(NULL); /* (played and left with Exit game: straight back to the menu) */
-        return 0;
+        return 0; /* (played and left with Exit game: straight back to the menu) */
     }
+    screen_open();
     printf(CONSOLE_YELLOW "Tenkaichi3Decomp" CONSOLE_RESET " - launcher\n\nThe game ended after %" PRIu64 " s, result %d.\n",
            (uint64_t)(armTicksToNs(armGetSystemTick() - t0) / 1000000000u), r);
     show_log_tail(folder, 24);
