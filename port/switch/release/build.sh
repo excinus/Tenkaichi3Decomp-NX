@@ -1,8 +1,8 @@
 #!/bin/sh
 # Builds a Switch release from a source tree (docs/port/switch_plan.md, phase 5): SDL3 for the Switch, the game
-# (BT3_CC=nx64, BT3_SKELETON=1: no disc involved), the launcher, and the two zips package.py makes:
-#   <tree>/port/build/Tenkaichi3Decomp-switch.zip      the game's folder: what the automatic update takes
-#   <tree>/port/build/Tenkaichi3Decomp-switch-SD.zip   the SD card's layout, for a first install
+# (BT3_CC=nx64, BT3_SKELETON=1: no disc involved), the launcher, and the release's zip package.py makes:
+#   <tree>/port/build/Tenkaichi3Decomp-switch.zip      the Switch's files as the SD card has them (port/switch/setup/
+#                                                      build.sh then makes each PC system's zip from it)
 #
 #   sh port/switch/release/build.sh <tree>
 #

@@ -2,8 +2,8 @@
 # Run workflow. It builds the branch chosen there (the default) with switch-build.yml and publishes this fork's release:
 #   the tag v<the original's version>-nx<n>: the n-th Switch release of the original repository's version that it
 #   has (v0.1.39.2-nx1, then -nx2 for a fix...), unless one is typed in;
-#   its files: Tenkaichi3Decomp-switch-SD.zip (a first install), Tenkaichi3Decomp-switch.zip and its .sig (the game's
-#   automatic update), and notes (port/switch/release/notes.sh).
+#   its files: Tenkaichi3Decomp-switch-windows.zip, -linux.zip and -macos.zip (each the setup for that system beside
+#   the Switch's files; the game's automatic update takes the Windows one) and the Windows one's .sig, and notes (port/switch/release/notes.sh).
 # A pre-release (the box) is not offered to the games (GitHub's "latest release" is never one) until it is edited
 # into a release on GitHub. The releases that follow the original repository are follow-upstream.yml's.
 name: switch-release
@@ -78,6 +78,10 @@ jobs:
         with:
           name: switch-release
           path: out
+      - uses: actions/download-artifact@v4
+        with:
+          name: switch-release-macos
+          path: out
       - env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.version.outputs.tag }}
@@ -88,8 +92,8 @@ jobs:
         run: |
           sh port/switch/release/notes.sh "$TAG" "$SHA" "$NOTES" "" > notes.md
           cat notes.md
-          sig=""; [ -f out/Tenkaichi3Decomp-switch.zip.sig ] && sig=out/Tenkaichi3Decomp-switch.zip.sig
+          sig=""; [ -f out/Tenkaichi3Decomp-switch-windows.zip.sig ] && sig=out/Tenkaichi3Decomp-switch-windows.zip.sig
           gh release create "$TAG" --target "$SHA" --title "$TAG (Nintendo Switch)" --notes-file notes.md \
             $( [ "$PRE" = true ] && echo --prerelease ) \
-            out/Tenkaichi3Decomp-switch-SD.zip out/Tenkaichi3Decomp-switch.zip $sig
+            out/Tenkaichi3Decomp-switch-windows.zip out/Tenkaichi3Decomp-switch-linux.zip out/Tenkaichi3Decomp-switch-macos.zip $sig
           [ "$SIGNED" = true ] || echo "::warning::$TAG is not signed: games will only say that it exists"

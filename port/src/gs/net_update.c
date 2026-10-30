@@ -33,8 +33,9 @@
  * HTTPS as the rest of the port has it (gs/net_match.c): WinHTTP on Windows, the system's curl library on Linux, and
  * failing those the `curl` program (BT3_MATCH_CURL=1 asks for the program). The Switch (docs/port/switch_plan.md,
  * phase 5): devkitPro's curl linked in, whose TLS is the console's own (its ssl service and certificates); this fork's
- * releases and key (port_release.h, update_key.h), Tenkaichi3Decomp-switch.zip; and no second program to start: the
- * game ends into its launcher, which says the update is in and to start the game again (update/restart.txt).
+ * releases and key (port_release.h, update_key.h), Tenkaichi3Decomp-switch-windows.zip; and no second program to
+ * start: the game ends into its launcher, which says the update is in and to start the game again
+ * (update/restart.txt).
  * Testing: BT3_UPDATE_API=<http://host:port> asks there instead of https://api.github.com (a local stand-in that
  * serves .../releases/latest and the files it names); BT3_UPDATE_FAIL_AT=<n> makes the n-th swap of step b fail.
  */
@@ -71,11 +72,18 @@ int UpdCrypto_Check(const uint8_t sig[64], const uint8_t pub[32], const uint8_t 
 #define ASSET GAME "-windows-x64.zip"
 #define GAME_EXE GAME ".exe"
 #elif defined(__SWITCH__)
-#define ASSET GAME "-switch.zip"
+#define ASSET GAME "-switch-windows.zip"
 #define GAME_EXE GAME /* (the ELF the launcher loads) */
+/* the release's zips are one per PC system, each the setup beside the SD card's layout (port/switch/setup/zip.py);
+   the game takes the Windows one, and from it only the game's folder: not the setup, the README, or the launcher in
+   switch/ (which takes its new copy from the game's folder itself) */
+#define ZIP_ROOT "atmosphere/contents/0100B73DEC000000/"
 #else
 #define ASSET GAME "-linux-x64.zip"
 #define GAME_EXE GAME
+#endif
+#ifndef ZIP_ROOT
+#define ZIP_ROOT GAME "/" /* (the zip's one folder: the game's) */
 #endif
 #define JSON_MAX (4 << 20) /* the release's description, notes and list of files */
 #define GAME_DAT GAME ".dat"
@@ -1124,11 +1132,15 @@ static int SDLCALL install_thread(void *arg) {
             SDL_strlcpy(why, "The archive's list of files is damaged.", sizeof(why));
             break;
         }
-        if (strncmp(st.m_filename, GAME "/", strlen(GAME "/")) != 0) {
+        if (strncmp(st.m_filename, ZIP_ROOT, strlen(ZIP_ROOT)) != 0) {
+#ifdef __SWITCH__
+            continue; /* (the rest of the SD card's layout) */
+#else
             SDL_snprintf(why, sizeof(why), "The archive is not a release of the game (a file outside its folder: %s).", st.m_filename);
             break;
+#endif
         }
-        rel = st.m_filename + strlen(GAME "/");
+        rel = st.m_filename + strlen(ZIP_ROOT);
         if (rel[0] == '\0' || st.m_is_directory) {
             continue;
         }

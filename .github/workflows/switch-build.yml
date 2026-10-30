@@ -1,8 +1,10 @@
 # A Switch release's build (docs/port/switch_plan.md, phase 5), called by switch-release.yml (a release by hand) and
 # follow-upstream.yml (a release of the original repository's update): port/switch/release/build.sh in devkitPro's
 # container, the zips signed, and kept as the artifact `switch-release`:
-#   Tenkaichi3Decomp-switch.zip (+ .sig)   the game's folder: what the game's automatic update installs
-#   Tenkaichi3Decomp-switch-SD.zip         the SD card's layout, for a first install
+#   Tenkaichi3Decomp-switch-windows.zip (+ .sig), -linux.zip, -macos.zip: one per PC system, each the setup for it
+#   (port/switch/setup) beside the Switch's files (atmosphere/, switch/); the setup puts them on the SD card with the
+#   game data from the player's disc image or PC version. The game's automatic update takes the Windows one (its
+#   game folder only), so that one is signed. The macOS one is built on a Mac (the job `mac`).
 #
 # The signing key: the repository secret UPDATE_SIGNING_KEY (made once with `python3 port/tools/update_key.py
 # generate`). Its public half is compiled into the game (BT3_UPDATE_KEY, port/src/update_key.h): a game installs only
@@ -124,6 +126,15 @@ jobs:
         if: inputs.compare_ref != ''
         run: python3 t/port/switch/release/compare.py old-build t/port/build --out "$GITHUB_OUTPUT"
 
+      # the setups for Windows and Linux, each in its zip (port/switch/setup/build.sh: SDL3 built static; mingw-w64
+      # for Windows; for Linux the display's headers, its libraries being loaded by SDL when it runs)
+      - name: The setups (Windows, Linux)
+        run: |
+          apt-get install -y --no-install-recommends mingw-w64 cmake libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
+            libxfixes-dev libxi-dev libxss-dev libxtst-dev libxkbcommon-dev libwayland-dev wayland-protocols libdbus-1-dev \
+            libudev-dev libegl-dev libgl-dev libdecor-0-dev
+          cd t && sh port/switch/setup/build.sh win && sh port/switch/setup/build.sh linux
+
       - name: Sign
         id: sign
         env:
@@ -131,8 +142,8 @@ jobs:
         run: |
           if [ -n "$UPDATE_SIGNING_KEY" ]; then
             cd t
-            python3 port/tools/update_key.py sign --any-key port/build/Tenkaichi3Decomp-switch.zip
-            python3 port/tools/update_key.py verify port/build/Tenkaichi3Decomp-switch.zip --public "$BT3_UPDATE_KEY"
+            python3 port/tools/update_key.py sign --any-key port/build/Tenkaichi3Decomp-switch-windows.zip
+            python3 port/tools/update_key.py verify port/build/Tenkaichi3Decomp-switch-windows.zip --public "$BT3_UPDATE_KEY"
             echo "signed=true" >> "$GITHUB_OUTPUT"
           else
             echo "signed=false" >> "$GITHUB_OUTPUT"
@@ -142,9 +153,9 @@ jobs:
         with:
           name: switch-release
           path: |
-            t/port/build/Tenkaichi3Decomp-switch.zip
-            t/port/build/Tenkaichi3Decomp-switch.zip.sig
-            t/port/build/Tenkaichi3Decomp-switch-SD.zip
+            t/port/build/Tenkaichi3Decomp-switch-windows.zip
+            t/port/build/Tenkaichi3Decomp-switch-windows.zip.sig
+            t/port/build/Tenkaichi3Decomp-switch-linux.zip
             t/port/build/stubs.txt
             t/port/build/stubs_added.txt
           if-no-files-found: warn
@@ -157,4 +168,45 @@ jobs:
             t/port/build/*_nx64.txt
             t/port/build/bt3_nx.map
           if-no-files-found: ignore
+          retention-days: 30
+      # what the Mac's job needs: the Switch's files, and the setup's source
+      - uses: actions/upload-artifact@v4
+        with:
+          name: switch-files
+          path: |
+            t/port/build/Tenkaichi3Decomp-switch.zip
+            t/port/build/nx/SDL3-*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  # the macOS setup (arm64 and x86_64 in one program) in its zip, on a Mac
+  mac:
+    needs: build
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - name: The source (a commit)
+        if: inputs.tree == ''
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - name: The source (the merge)
+        if: inputs.tree != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.tree }}
+          path: tree
+      - if: inputs.tree != ''
+        run: tar -xzf tree/tree.tar.gz && rm -rf tree
+      - uses: actions/download-artifact@v4
+        with:
+          name: switch-files
+          path: port/build
+      - name: The macOS setup
+        run: sh port/switch/setup/build.sh mac
+      - uses: actions/upload-artifact@v4
+        with:
+          name: switch-release-macos
+          path: port/build/Tenkaichi3Decomp-switch-macos.zip
+          if-no-files-found: error
           retention-days: 30

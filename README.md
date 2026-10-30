@@ -42,20 +42,21 @@ You need:
 - a Switch with **Atmosphère** and the homebrew menu;
 - **sys-clk**, included in the [HATS pack](https://sthetix.info/hats/releases/): the game sets the clocks it needs by
   itself (without it, fights run at 16–20 fps);
-- the **PC version** of [Tenkaichi3Decomp](https://github.com/z3xox/Tenkaichi3Decomp) installed from your disc: its
-  game data is copied to the card.
+- your **disc image** of the USA release (`.iso`), or the **PC version** of
+  [Tenkaichi3Decomp](https://github.com/z3xox/Tenkaichi3Decomp) already installed from it.
 
 Steps:
 
-1. Download **`Tenkaichi3Decomp-switch-SD.zip`** from the
-   [latest release](https://github.com/excinus/Tenkaichi3Decomp-NX/releases/latest) and unpack it to the root of
-   the SD card.
-2. On the card, double-click **`Install game data (Windows).bat`** and choose your PC installation's folder. It copies
-   the game data for you (a few minutes).
+1. Download the zip for your PC from the [latest release](https://github.com/excinus/Tenkaichi3Decomp-NX/releases/latest)
+   (**windows**, **linux** or **macos**), unpack it, and start **Tenkaichi3Decomp-switch-setup** inside.
+2. Choose your disc image or your PC version's folder, then your SD card, and press **Install**. It puts the game and
+   its data on the card (a few minutes).
 3. On the Switch, open the homebrew menu **through a game** (hold R while starting any game) and start
    **Tenkaichi3Decomp**.
+4. *Optional, recommended:* put the game on the HOME menu with a forwarder made by
+   [sphaira](https://github.com/NaGaa95/sphaira), so it starts like any other game.
 
-Linux and macOS: see `INSTALL.txt` in the zip.
+On macOS the first start may be refused (an unsigned program): right-click the setup, **Open**, then **Open** again.
 
 ## Troubleshooting
 
@@ -67,7 +68,8 @@ Linux and macOS: see `INSTALL.txt` in the zip.
 ## Building
 
 See [docs/port/switch_plan.md](docs/port/switch_plan.md). In devkitPro's container with LLVM 22:
-`sh port/switch/release/build.sh .` builds both zips; no game files are needed. The rest of the repository is
+`sh port/switch/release/build.sh .` builds the game, then `sh port/switch/setup/build.sh win` (or `linux`, or `mac` on a
+Mac) the release's zip with the setup; no game files are needed. The rest of the repository is
 Tenkaichi3Decomp, followed release by release; for the PC version, use
 [upstream](https://github.com/z3xox/Tenkaichi3Decomp).
 
