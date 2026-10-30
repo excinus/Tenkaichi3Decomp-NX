@@ -39,6 +39,12 @@ typedef int socklen_t;
 #include <unistd.h>
 #define closesocket close
 #endif
+#ifdef __SWITCH__
+int Port_NxNetUp(void); /* plat_nxpad.c: the console's sockets, once (what WSAStartup is on Windows) */
+#define NET_UP() Port_NxNetUp()
+#else
+#define NET_UP() ((void)0)
+#endif
 #include "gs_internal.h"
 
 extern int Port_PadRead(int socket, unsigned char *data); /* gs_input.c: the keyboard and the controllers */
@@ -1878,6 +1884,7 @@ static void net_start(int role, const char *host, const char *join) {
         sSock = (int)socket(AF_INET, SOCK_DGRAM, 0);
         ioctlsocket(sSock, FIONBIO, &on);
 #else
+        NET_UP();
         sSock = socket(AF_INET, SOCK_DGRAM, 0);
         fcntl(sSock, F_SETFL, fcntl(sSock, F_GETFL, 0) | O_NONBLOCK);
 #endif
@@ -3359,6 +3366,7 @@ int Port_LobbyStart(int host, const char *address, int port) {
         ioctlsocket(sSock, FIONBIO, &on);
     }
 #else
+    NET_UP();
     sSock = socket(AF_INET, SOCK_DGRAM, 0);
     fcntl(sSock, F_SETFL, fcntl(sSock, F_GETFL, 0) | O_NONBLOCK);
 #endif
@@ -3463,6 +3471,7 @@ const char *Port_NetLanAddress(void) {
         WSAStartup(MAKEWORD(2, 2), &w);
     }
 #endif
+    NET_UP();
     s = (int)socket(AF_INET, SOCK_DGRAM, 0);
     if (s < 0) {
         return text;
@@ -4109,6 +4118,7 @@ int NetIo_Open(int port) {
         ioctlsocket(sSock, FIONBIO, &on);
     }
 #else
+    NET_UP();
     sSock = socket(AF_INET, SOCK_DGRAM, 0);
     fcntl(sSock, F_SETFL, fcntl(sSock, F_GETFL, 0) | O_NONBLOCK);
 #endif

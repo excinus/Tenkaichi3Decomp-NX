@@ -195,7 +195,8 @@ void Port_StateLog(unsigned vblank, const void *fight, unsigned fightSize) {
 }
 
 /* ---------------------------------------------------------------------------------------------------------------
- * Saving and restoring the game's state, and the test of it. (The 64-bit programs: Linux and Windows.)
+ * Saving and restoring the game's state, and the test of it. (The 64-bit programs: Linux, Windows, macOS and the
+ * Switch.)
  *
  * A snapshot is: the regions the checksum covers, the port's own memory that belongs to the game's state
  * (Port_StateExtra), the used part of the game thread's stack, and the processor's registers at the moment of
@@ -210,11 +211,16 @@ void Port_StateLog(unsigned vblank, const void *fight, unsigned fightSize) {
  *                    one's checksum, restore, run the n again and compare each. What online play does when an
  *                    input arrives late: several frames are undone and replayed.
  * ------------------------------------------------------------------------------------------------------------- */
-#if defined(__x86_64__) || defined(__APPLE__)
-#ifdef __APPLE__
+#if defined(__x86_64__) || defined(__APPLE__) || defined(__SWITCH__)
+#if defined(__APPLE__) || defined(__SWITCH__)
 /* macOS: as on Windows, the registers are kept with a setjmp (the C library's, without the signal mask: macOS has
-   no ucontext functions on arm64) and the copy back runs on another stack through the port's stack switch. */
+   no ucontext functions on arm64) and the copy back runs on another stack through the port's stack switch. The
+   Switch the same (its C library's setjmp keeps no signal mask, there are none; plat_mem.c's stack switch). */
 #include <setjmp.h>
+#ifdef __SWITCH__
+#define _setjmp setjmp
+#define _longjmp longjmp
+#endif
 extern void Port_CallOnStack(void (*fn)(void), void *top);
 #elif defined(_WIN32)
 /* Windows: the registers are kept with the compiler's own minimal setjmp (frame, stack pointer and the place to
@@ -234,7 +240,7 @@ extern void Port_PadPlaySeek(long pos);
 typedef struct Snapshot {
     struct { uint8_t *at; size_t n; uint8_t *copy; size_t cap; } part[MAX_PARTS];
     int parts;
-#ifdef __APPLE__
+#if defined(__APPLE__) || defined(__SWITCH__)
     jmp_buf jb;
 #elif defined(_WIN32)
     void *jb[5];
@@ -285,7 +291,7 @@ static int __attribute__((noinline)) state_save(Snapshot *s) {
     s->padPos = Port_PadPlayPos();
     s->loaded = 0;
     part_save(s, sp, (size_t)(top - sp)); /* the stack last: this frame's own contents as they are now */
-#ifdef __APPLE__
+#if defined(__APPLE__) || defined(__SWITCH__)
     if (_setjmp(s->jb) != 0) {
         return 1;
     }
@@ -302,7 +308,7 @@ static int __attribute__((noinline)) state_save(Snapshot *s) {
 }
 
 static Snapshot *sLoading;
-#if !defined(_WIN32) && !defined(__APPLE__)
+#if !defined(_WIN32) && !defined(__APPLE__) && !defined(__SWITCH__)
 static ucontext_t sLoaderCtx;
 #endif
 
@@ -314,7 +320,7 @@ static void loader(void) {
     }
     Port_PadPlaySeek(s->padPos);
     s->loaded = 1;
-#ifdef __APPLE__
+#if defined(__APPLE__) || defined(__SWITCH__)
     _longjmp(s->jb, 1);
 #elif defined(_WIN32)
     __builtin_longjmp(s->jb, 1);
@@ -332,7 +338,7 @@ static void state_load(Snapshot *s) {
     }
     roll_forget();
     sLoading = s;
-#if defined(_WIN32) || defined(__APPLE__)
+#if defined(_WIN32) || defined(__APPLE__) || defined(__SWITCH__)
     Port_CallOnStack(loader, stack + (1 << 20) - 64); /* (does not come back: the loader continues at the save) */
 #else
     getcontext(&sLoaderCtx);
@@ -375,6 +381,37 @@ static uint64_t parts_hash(void) {
  * A read() into a read-only page does not fault, it fails: whatever lets the system write file data straight
  * into the game's memory calls Port_StateTouch first.
  * ------------------------------------------------------------------------------------------------------------- */
+#ifdef __SWITCH__
+/* The Switch: no roll ring. Horizon gives a program neither the faults of its own writes nor a list of the pages
+   written, so nothing tells which pages a blank changed, and a whole copy per blank (30 MB and more) does not fit in
+   one. Online play there waits for the other player's input instead of guessing (net.c: a rollback limit of 0, the
+   input delay from the connection); the other side may still roll back, the two ways play together. A session
+   (below) needs only whole states, which work. */
+static int tracked_part(const uint8_t *p) {
+    (void)p;
+    return 0;
+}
+static void roll_forget(void) {}
+static int roll_save(void) {
+    return 0;
+}
+static void roll_back(int k) {
+    (void)k;
+}
+int Port_RollCan(void) {
+    return 0;
+}
+int Port_RollSave(void) {
+    return 0;
+}
+void Port_RollBack(int k) {
+    (void)k;
+}
+void Port_StateTouch(void *p, unsigned long n) {
+    (void)p;
+    (void)n;
+}
+#else
 #ifdef __APPLE__
 #define PG 16384u /* the page size of Apple Silicon: what mprotect works in */
 #else
@@ -757,6 +794,7 @@ int Port_RollSave(void) {
 void Port_RollBack(int k) {
     roll_back(k);
 }
+#endif /* (the roll ring) */
 
 #define SYNC_MAX_DEPTH 64
 

@@ -187,6 +187,26 @@ static int http_post_native(const char *url, const char *json, const char *const
     return ok;
 }
 #else
+#ifdef __SWITCH__
+/* The Switch: devkitPro's curl (portlibs, linked by port/tools/link.py; its TLS the console's own), as gs/net_update.c
+   has it, and the answer into memory (no temporary files there). */
+void *curl_easy_init(void);
+int curl_easy_setopt(void *h, int option, ...);
+int curl_easy_perform(void *h);
+void curl_easy_cleanup(void *h);
+void *curl_slist_append(void *list, const char *line);
+void curl_slist_free_all(void *list);
+int Port_NxNetUp(void); /* plat_nxpad.c: the console's sockets, once */
+typedef struct { char *out; size_t size, used; } Answer;
+static size_t answer_put(char *data, size_t size, size_t count, void *user) {
+    Answer *a = (Answer *)user;
+    size_t n = size * count, room = a->size - 1 - a->used;
+    SDL_memcpy(a->out + a->used, data, n < room ? n : room); /* (what does not fit is dropped, as the file's read) */
+    a->used += n < room ? n : room;
+    a->out[a->used] = '\0';
+    return size * count;
+}
+#endif
 /* Linux: the system's curl library, if it is there (it nearly always is), loaded when first needed. */
 static int http_post_native(const char *url, const char *json, const char *const *headers, char *out, size_t size) {
     typedef void *(*init_fn)(void);
@@ -213,6 +233,19 @@ static int http_post_native(const char *url, const char *json, const char *const
         static const char *const names[] = {"libcurl.so.4", "libcurl-gnutls.so.4", "libcurl.so"};
         size_t i;
         tried = 1;
+#ifdef __SWITCH__
+        (void)names;
+        (void)i;
+        (void)lib;
+        if (Port_NxNetUp()) {
+            init = curl_easy_init;
+            setopt = curl_easy_setopt;
+            perform = curl_easy_perform;
+            cleanup = curl_easy_cleanup;
+            append = curl_slist_append;
+            freeall = curl_slist_free_all;
+        }
+#else
         for (i = 0; lib == NULL && i < sizeof(names) / sizeof(names[0]); i++) {
             lib = SDL_LoadObject(names[i]);
         }
@@ -224,16 +257,26 @@ static int http_post_native(const char *url, const char *json, const char *const
             append = (append_fn)SDL_LoadFunction(lib, "curl_slist_append");
             freeall = (freeall_fn)SDL_LoadFunction(lib, "curl_slist_free_all");
         }
+#endif
     }
     (void)mem;
     if (init == NULL || setopt == NULL || perform == NULL || cleanup == NULL || (headers != NULL && (append == NULL || freeall == NULL)) || (h = init()) == NULL) {
         return 0;
     }
+#ifdef __SWITCH__
+    Answer answer = {out, size, 0};
+    out[0] = '\0';
+    fp = NULL;
+    setopt(h, 20011 /* CURLOPT_WRITEFUNCTION */, answer_put);
+    setopt(h, 10001 /* CURLOPT_WRITEDATA */, &answer);
+#else
     fp = tmpfile(); /* (the library writes the answer with fwrite by default: into a file that is never on disk by name) */
     if (fp == NULL) {
         cleanup(h);
         return 0;
     }
+    setopt(h, 10001 /* CURLOPT_WRITEDATA */, fp);
+#endif
     setopt(h, 10002 /* CURLOPT_URL */, url);
     if (json != NULL) {
         setopt(h, 10015 /* CURLOPT_POSTFIELDS */, json);
@@ -247,7 +290,6 @@ static int http_post_native(const char *url, const char *json, const char *const
     if (list != NULL) {
         setopt(h, 10023 /* CURLOPT_HTTPHEADER */, list);
     }
-    setopt(h, 10001 /* CURLOPT_WRITEDATA */, fp);
     setopt(h, 13 /* CURLOPT_TIMEOUT */, 12L);
     setopt(h, 99 /* CURLOPT_NOSIGNAL */, 1L);
     rc = perform(h);
@@ -256,12 +298,19 @@ static int http_post_native(const char *url, const char *json, const char *const
         freeall(list);
     }
     n = 0;
+#ifdef __SWITCH__
+    n = (long)answer.used;
+    if (rc != 0) {
+        fprintf(stderr, "bt3: matchmaking: %s: curl error %d\n", url, rc);
+    }
+#else
     if (rc == 0) {
         rewind(fp);
         n = (long)fread(out, 1, size - 1, fp);
         out[n > 0 ? n : 0] = '\0';
     }
     fclose(fp);
+#endif
     return rc == 0 && n > 0;
 }
 #endif
