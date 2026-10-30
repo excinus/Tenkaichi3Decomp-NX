@@ -578,6 +578,41 @@ static void bind_frame_range(int binding, uint32_t off, size_t n) {
     }
 }
 
+/* ---- the frame's buffers, three sets in turn ---------------------------------------------------------------------
+ * The vertices, the vertex programs' vertices and indices and the uniform blocks of a frame went into new storage
+ * every frame (glBufferData with the data): on the Switch's Mesa that is new GPU memory each time, 5 to 25 ms a fight
+ * frame ("uploads", 2026-10-30). Here each set's buffers are made once and written in place, mapped without
+ * synchronisation (glMapBufferRange, GL_MAP_UNSYNCHRONIZED_BIT), the sets in turn; a set is written again only after
+ * the fence put behind its frame's draws has passed, and the time waited there is the GPU being behind (BT3_GS_VERBOSE).
+ * On the Switch by default; BT3_GL_RING=0/1 over it. */
+typedef struct __GLsync *GLsync;
+#define GL_MAP_WRITE_BIT 0x0002
+#define GL_MAP_UNSYNCHRONIZED_BIT 0x0020
+#define GL_SYNC_GPU_COMMANDS_COMPLETE 0x9117
+#define GL_SYNC_FLUSH_COMMANDS_BIT 0x00000001
+#define RING 3
+static void *(*pglMapBufferRange)(GLenum, GLintptr, GLsizeiptr, GLbitfield);
+static GLboolean (*pglUnmapBuffer)(GLenum);
+static GLsync (*pglFenceSync)(GLenum, GLbitfield);
+static GLenum (*pglClientWaitSync)(GLsync, GLbitfield, uint64_t);
+static void (*pglDeleteSync)(GLsync);
+static int sRing;  /* 1: the sets in turn */
+static int sRingAt;
+static struct { GLuint vaoGs, vaoVu, vboGs, vboVu, iboVu, ubo; size_t uboCap; GLsync fence; } sSet[RING];
+static uint64_t sGpuWaitNs; /* (BT3_GS_VERBOSE) */
+static unsigned sDrawsAll, sDrawsJoinable;
+
+/* Writes n bytes at the start of the buffer bound to `target`. */
+static void ring_write(GLenum target, const void *data, size_t n) {
+    void *p = pglMapBufferRange(target, 0, (GLsizeiptr)n, GL_MAP_WRITE_BIT | GL_MAP_UNSYNCHRONIZED_BIT);
+    if (p != NULL) {
+        memcpy(p, data, n);
+        pglUnmapBuffer(target);
+    } else {
+        glBufferSubData(target, 0, (GLsizeiptr)n, data);
+    }
+}
+
 
 
 static void set_pipe(int pipe) {
@@ -742,33 +777,51 @@ static int gl_init(void) {
     sDclutProg = make_program(kFxVertGlsl, kDclutFragGlsl, "dclut", sDclutSamplers, 3);
     sPresentProg = make_present_program();
 
-    glGenBuffers(1, &sVboGs);
-    glBindBuffer(GL_ARRAY_BUFFER, sVboGs);
-    glBufferData(GL_ARRAY_BUFFER, MAX_VERTS * sizeof(Vtx), NULL, GL_STREAM_DRAW);
-    glGenVertexArrays(1, &sVaoGs);
-    glBindVertexArray(sVaoGs);
-    glBindBuffer(GL_ARRAY_BUFFER, sVboGs);
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vtx), (void *)0);
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(Vtx), (void *)12);
-    glEnableVertexAttribArray(2);
-    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, sizeof(Vtx), (void *)16);
+    pglMapBufferRange = (void *(*)(GLenum, GLintptr, GLsizeiptr, GLbitfield))SDL_GL_GetProcAddress("glMapBufferRange");
+    pglUnmapBuffer = (GLboolean(*)(GLenum))SDL_GL_GetProcAddress("glUnmapBuffer");
+    pglFenceSync = (GLsync(*)(GLenum, GLbitfield))SDL_GL_GetProcAddress("glFenceSync");
+    pglClientWaitSync = (GLenum(*)(GLsync, GLbitfield, uint64_t))SDL_GL_GetProcAddress("glClientWaitSync");
+    pglDeleteSync = (void (*)(GLsync))SDL_GL_GetProcAddress("glDeleteSync");
+#ifdef __SWITCH__
+    sRing = 1;
+#endif
+    if (getenv("BT3_GL_RING") != NULL) { sRing = atoi(getenv("BT3_GL_RING")) != 0; }
+    if (!pglMapBufferRange || !pglUnmapBuffer || !pglFenceSync || !pglClientWaitSync || !pglDeleteSync) { sRing = 0; }
+    for (int k = 0; k < (sRing ? RING : 1); k++) {
+        glGenBuffers(1, &sSet[k].vboGs);
+        glBindBuffer(GL_ARRAY_BUFFER, sSet[k].vboGs);
+        glBufferData(GL_ARRAY_BUFFER, MAX_VERTS * sizeof(Vtx), NULL, GL_STREAM_DRAW);
+        glGenVertexArrays(1, &sSet[k].vaoGs);
+        glBindVertexArray(sSet[k].vaoGs);
+        glBindBuffer(GL_ARRAY_BUFFER, sSet[k].vboGs);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vtx), (void *)0);
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(Vtx), (void *)12);
+        glEnableVertexAttribArray(2);
+        glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, sizeof(Vtx), (void *)16);
 
-    glGenBuffers(1, &sVboVu);
-    glBindBuffer(GL_ARRAY_BUFFER, sVboVu);
-    glBufferData(GL_ARRAY_BUFFER, MAX_VU_VERTS * 48, NULL, GL_STREAM_DRAW);
-    glGenVertexArrays(1, &sVaoVu);
-    glBindVertexArray(sVaoVu);
-    glBindBuffer(GL_ARRAY_BUFFER, sVboVu);
-    for (i = 0; i < 3; i++) {
-        glEnableVertexAttribArray((GLuint)i);
-        glVertexAttribPointer((GLuint)i, 4, GL_FLOAT, GL_FALSE, 48, (void *)(uintptr_t)(i * 16));
+        glGenBuffers(1, &sSet[k].vboVu);
+        glBindBuffer(GL_ARRAY_BUFFER, sSet[k].vboVu);
+        glBufferData(GL_ARRAY_BUFFER, MAX_VU_VERTS * 48, NULL, GL_STREAM_DRAW);
+        glGenVertexArrays(1, &sSet[k].vaoVu);
+        glBindVertexArray(sSet[k].vaoVu);
+        glBindBuffer(GL_ARRAY_BUFFER, sSet[k].vboVu);
+        for (i = 0; i < 3; i++) {
+            glEnableVertexAttribArray((GLuint)i);
+            glVertexAttribPointer((GLuint)i, 4, GL_FLOAT, GL_FALSE, 48, (void *)(uintptr_t)(i * 16));
+        }
+        glGenBuffers(1, &sSet[k].iboVu); /* the triangles' indices (gsVuIdx); the binding is part of the vertex array's state */
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, sSet[k].iboVu);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, MAX_VU_IDX * sizeof(uint32_t), NULL, GL_STREAM_DRAW);
+        glBindVertexArray(0);
+        glGenBuffers(1, &sSet[k].ubo);
     }
-    glGenBuffers(1, &sIboVu); /* the triangles' indices (gsVuIdx); the binding is part of the vertex array's state */
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, sIboVu);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, MAX_VU_IDX * sizeof(uint32_t), NULL, GL_STREAM_DRAW);
-    glBindVertexArray(0);
+    sVboGs = sSet[0].vboGs;
+    sVaoGs = sSet[0].vaoGs;
+    sVboVu = sSet[0].vboVu;
+    sVaoVu = sSet[0].vaoVu;
+    sIboVu = sSet[0].iboVu;
 
     glGenBuffers(1, &sUboU);
     glBindBuffer(GL_UNIFORM_BUFFER, sUboU);
@@ -778,7 +831,7 @@ static int gl_init(void) {
     glBindBuffer(GL_UNIFORM_BUFFER, sUboParams);
     glBufferData(GL_UNIFORM_BUFFER, 80, NULL, GL_DYNAMIC_DRAW);
     glBindBufferBase(GL_UNIFORM_BUFFER, 1, sUboParams);
-    glGenBuffers(1, &sUboFrame);
+    sUboFrame = sSet[0].ubo;
     glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &sUboAlign);
     if (sUboAlign < 16 || (sUboAlign & (sUboAlign - 1)) != 0) { sUboAlign = 256; }
 
@@ -884,17 +937,46 @@ static void frame_end(void) {
     }
 
     tEnd[0] = SDL_GetTicksNS();
+    if (sRing) { /* the next set, once the GPU is done with its last frame */
+        int k = sRingAt = (sRingAt + 1) % RING;
+        if (sSet[k].fence != NULL) {
+            uint64_t w = SDL_GetTicksNS();
+            pglClientWaitSync(sSet[k].fence, GL_SYNC_FLUSH_COMMANDS_BIT, 200000000ull);
+            pglDeleteSync(sSet[k].fence);
+            sSet[k].fence = NULL;
+            sGpuWaitNs += SDL_GetTicksNS() - w;
+        }
+        sVboGs = sSet[k].vboGs;
+        sVaoGs = sSet[k].vaoGs;
+        sVboVu = sSet[k].vboVu;
+        sVaoVu = sSet[k].vaoVu;
+        sIboVu = sSet[k].iboVu;
+        sUboFrame = sSet[k].ubo;
+        if (gsVertCount != 0) {
+            glBindBuffer(GL_ARRAY_BUFFER, sVboGs);
+            ring_write(GL_ARRAY_BUFFER, gsVerts, gsVertCount * sizeof(Vtx));
+        }
+        if (gsVuVertCount != 0) {
+            glBindBuffer(GL_ARRAY_BUFFER, sVboVu);
+            ring_write(GL_ARRAY_BUFFER, gsVuVerts, gsVuVertCount * 48);
+        }
+        if (gsVuIdxCount != 0) {
+            glBindVertexArray(sVaoVu);
+            ring_write(GL_ELEMENT_ARRAY_BUFFER, gsVuIdx, gsVuIdxCount * sizeof(uint32_t));
+            glBindVertexArray(0);
+        }
+    }
     /* (new storage of the frame's size each time, data and all, rather than writing over the buffer the previous
        frame's draws may still be reading: the driver need not wait for them or copy) */
-    if (gsVertCount != 0) {
+    if (!sRing && gsVertCount != 0) {
         glBindBuffer(GL_ARRAY_BUFFER, sVboGs);
         glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(gsVertCount * sizeof(Vtx)), gsVerts, GL_STREAM_DRAW);
     }
-    if (gsVuVertCount != 0) {
+    if (!sRing && gsVuVertCount != 0) {
         glBindBuffer(GL_ARRAY_BUFFER, sVboVu);
         glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(gsVuVertCount * 48), gsVuVerts, GL_STREAM_DRAW);
     }
-    if (gsVuIdxCount != 0) {
+    if (!sRing && gsVuIdxCount != 0) {
         glBindVertexArray(sVaoVu);
         glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr)(gsVuIdxCount * sizeof(uint32_t)), gsVuIdx, GL_STREAM_DRAW);
         glBindVertexArray(0);
@@ -954,7 +1036,14 @@ static void frame_end(void) {
             }
         }
     }
-    if (sStageUsed != 0) {
+    if (sStageUsed != 0 && sRing) {
+        glBindBuffer(GL_UNIFORM_BUFFER, sUboFrame);
+        if (sSet[sRingAt].uboCap < sStageUsed) { /* (grown, now and then: room for more) */
+            sSet[sRingAt].uboCap = sStageUsed + sStageUsed / 2;
+            glBufferData(GL_UNIFORM_BUFFER, (GLsizeiptr)sSet[sRingAt].uboCap, NULL, GL_STREAM_DRAW);
+        }
+        ring_write(GL_UNIFORM_BUFFER, sStage, sStageUsed);
+    } else if (sStageUsed != 0) {
         glBindBuffer(GL_UNIFORM_BUFFER, sUboFrame);
         glBufferData(GL_UNIFORM_BUFFER, (GLsizeiptr)sStageUsed, sStage, GL_STREAM_DRAW);
     }
@@ -1104,6 +1193,21 @@ static void frame_end(void) {
     }
 
     tEnd[2] = SDL_GetTicksNS();
+    if (sRing) {
+        sSet[sRingAt].fence = pglFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+    }
+    if (getenv("BT3_GS_VERBOSE") != NULL) { /* draws that could have been one with the draw before (the same state, the next vertices) */
+        for (n = 1; n < gsDrawCount; n++) {
+            const GsDraw *d = &gsDraws[n], *e = &gsDraws[n - 1];
+            sDrawsAll++;
+            if (!d->native && !e->native && !d->vu && !e->vu && d->pipeline == e->pipeline && d->target == e->target &&
+                d->tex == e->tex && d->sampler == e->sampler && d->blendc == e->blendc && sParOff[n] == sParOff[n - 1] &&
+                memcmp(d->scissor, e->scissor, sizeof(d->scissor)) == 0 && d->first == e->first + e->count &&
+                !sPipes[d->pipeline].shadow) {
+                sDrawsJoinable++;
+            }
+        }
+    }
     /* the shown buffer: the one sceGsSwapDBuff set up for this frame, else the first target */
     best = gGsMainFbp >= 0 ? GsDraw_TargetGet((uint32_t)gGsMainFbp, 0) : -1;
     for (i = 0; best < 0 && i < gsTargetCount; i++) { best = i; }
@@ -1194,10 +1298,14 @@ static void frame_end(void) {
         sum[3] += now - tEnd[3];
         if (++count == 60) {
             if (getenv("BT3_GS_VERBOSE") != NULL) {
-                fprintf(stderr, "time:   of ending the frame (GL): uploads %.2f ms, issuing the draws %.2f, the picture and the "
-                                "overlay %.2f, swapping (the driver, the screen) %.2f; %u KB of uniform blocks\n",
-                        (double)sum[0] / 60e6, (double)sum[1] / 60e6, (double)sum[2] / 60e6, (double)sum[3] / 60e6,
-                        (unsigned)(sStageUsed >> 10));
+                fprintf(stderr, "time:   of ending the frame (GL): uploads %.2f ms (of it waiting for the GPU %.2f), issuing the draws %.2f, "
+                                "the picture and the overlay %.2f, swapping (the driver, the screen) %.2f; %u KB of uniform blocks; "
+                                "%u of %u draws could be joined with the one before%s\n",
+                        (double)sum[0] / 60e6, (double)sGpuWaitNs / 60e6, (double)sum[1] / 60e6, (double)sum[2] / 60e6,
+                        (double)sum[3] / 60e6, (unsigned)(sStageUsed >> 10), sDrawsJoinable, sDrawsAll,
+                        sRing ? "; buffers in turn" : "");
+                sGpuWaitNs = 0;
+                sDrawsAll = sDrawsJoinable = 0;
             }
             count = 0;
             memset(sum, 0, sizeof(sum));

@@ -73,6 +73,8 @@ BT3_GS_VERBOSE=1
 BT3_HUD_LOG=1
 # The drawing on the game's own core, as in the kits before (slower): remove the # to compare.
 #BT3_GS_THREAD=0
+# OpenGL's buffers given new storage every frame, as in the kits before: remove the # to compare.
+#BT3_GL_RING=0
 ENV
 cat > $K/README.txt <<'TXT'
 Tenkaichi3Decomp for the Nintendo Switch - test kit: the game (phase 4 of docs/port/switch_plan.md)

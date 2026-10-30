@@ -637,3 +637,16 @@ became a NEXT. In the super attack's scenes no shadow is drawn. Changed:
   `bt3_env.txt` (written line by line, it held the game for minutes: the "stuck" after the super attack);
 - the European menu art's pairing (12.4 s on the console, the Italian pictures missing until then) kept in
   `gamedata/game-text/menu_art_<bank>.cache` once made, and read from it at the next start (the Switch only).
+
+The kit of commit 1b0a10a, the same console, two starts: Italian at once on the second start (menu art from its
+cache, 0.6 s); the HUD, the effects and the pause menu shown. The first start's fight good, the second's worse
+(drops to 9 pictures a second, the HUD jumping about). The logs: OpenGL's "issuing the draws" 14.1 ms in the first,
+24.5 ms in the second, the ratio of 1785 MHz to 1020 MHz: the second ran at the stock clock (sys-clk's profile not
+applied: its profiles are per title, and the homebrew menu runs as the game held R on). Ticks not shown: about 35 of
+120 in the first, 75 of 120 in the second (the HUD's own moves, its shake on a hit, seen at a third of its pictures,
+unevenly). "Uploads" 5 to 9 ms (OC) and 9 to 25 ms (stock), more than before the render thread. Changed:
+- OpenGL's frame buffers in three sets used in turn (gs_gl.c): made once, written in place through an
+  unsynchronised mapping, a fence behind each frame's draws waited for before its set is written again (the
+  Switch; `BT3_GL_RING=0` for the old way: new storage of every buffer every frame);
+- `BT3_GS_VERBOSE`: the time waited for the GPU at those fences (the GPU's share), and how many draws could be one
+  with the draw before (the same state, the next vertices): what joining them would save.
