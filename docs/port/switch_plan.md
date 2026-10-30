@@ -6,9 +6,10 @@ record of what was checked; update it as phases land, as docs/port/macos_plan.md
 Status 2026-10-29: phase 4 under way: the Switch's drivers for SDL3 (video with OpenGL through Mesa, sound,
 controllers) are written and the game links with them. On a console it now runs to the main menu, with picture,
 sound and controllers (after a black screen found to be SDL asking libnx's sockets service for the number of
-processors, see "Results") and into fights, a fight at 20 to 30 pictures a second; open: stops of a second at each
-spoken line (in the menus at each move: a folder of 65,000 files, now read from one pack, "Results"), the fight's
-HUD and pause menu not shown, the intro movies flickering black.
+processors, see "Results") and into fights: with the CPU at 1785 MHz (sys-clk) a fight at a clean 30 pictures a
+second, the HUD, effects and pause menu shown, the menus without stops (the data folder of 65,000 files read from
+one pack, `pack_gamedata.py`). Open: speed at the stock clock (the OpenGL driver's CPU work, about 25 ms a fight
+frame there), the intro movies flickering black.
 Phase 3 done: the game's demo fight ran to its end on a Switch, its fight state identical to the PC's on all 4242
 blanks of fighting (see "Results").
 - Phase 1: `port/switch/spike`, a homebrew program that checks on a console what the port depends on (memory,
@@ -650,3 +651,11 @@ unevenly). "Uploads" 5 to 9 ms (OC) and 9 to 25 ms (stock), more than before the
   Switch; `BT3_GL_RING=0` for the old way: new storage of every buffer every frame);
 - `BT3_GS_VERBOSE`: the time waited for the GPU at those fences (the GPU's share), and how many draws could be one
   with the draw before (the same state, the next vertices): what joining them would save.
+
+The kit of commit e92c2f2, the same console, overclocked (sys-clk 1785 MHz): "perfect, no issues whatsoever, a clean
+30 pictures a second (25 at the least in some scenes)". The log of a fight: OpenGL's uploads 1.9 ms (8.5 before the
+buffers in turn), waiting for the GPU 0.01 ms (the GPU is not what limits), issuing the draws 14.5 ms, 1 to 12 ticks
+of 120 not shown; 0 of about 2270 draws a frame could be joined with the draw before (each has its own uniform
+block), so joining draws is not worth doing. At the stock clock the draws' 14.5 ms would be about 25: the driver's
+CPU work is what an unclocked console still lacks. Changed: vibration at 30% by default on the Switch (at 100% too
+strong in the Joy-Cons, the player's report), in the settings' default and the Controls tab's reset alike.

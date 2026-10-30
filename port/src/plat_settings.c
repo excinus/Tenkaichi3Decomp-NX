@@ -30,7 +30,8 @@ static pthread_mutex_t sLock = PTHREAD_MUTEX_INITIALIZER;
 /* The Switch: what the PC versions keep that does not apply there (one screen, OpenGL only, no mouse, its updates
    are its own: the settings window does not show these there). Not kept, and left out of the file when it is next
    written. And the start without the logos, the intro movie and the copyright page unless chosen otherwise: the
-   movies flicker on the console for now (2026-10-29). */
+   movies flicker on the console for now (2026-10-29); and vibration at 30% (Controls), at 100% too strong in the
+   Joy-Cons (a player's report, 2026-10-30). */
 static int unused_here(const char *name) {
     static const char *const kUnused[] = {"fullscreen", "display", "gpu_api", "render_thread", "hide_pointer", "update_check"};
     size_t i;
@@ -42,6 +43,9 @@ static int unused_here(const char *name) {
     return 0;
 }
 static int default_here(const char *name, int def) {
+    if (strncmp(name, "vibration_p", 11) == 0 && strstr(name, "_strength") != NULL) {
+        return 30;
+    }
     return strcmp(name, "skip_logos") == 0 || strcmp(name, "skip_intro") == 0 || strcmp(name, "skip_copyright") == 0 ? 1 : def;
 }
 #else

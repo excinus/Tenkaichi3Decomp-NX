@@ -83,7 +83,11 @@ static void defaults(int player) {
     }
     sDeadzone[player][0] = sDeadzone[player][1] = -1;
     sVib[player][0] = 1;
+#ifdef __SWITCH__
+    sVib[player][1] = 30; /* (the Joy-Cons' motors: 100% is too strong; plat_settings.c, default_here) */
+#else
     sVib[player][1] = 100;
+#endif
 }
 
 static int range(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
