@@ -28,4 +28,16 @@ int Port_NxControllers(int players) {
             R_SUCCEEDED(rc) ? "done" : "left", (int)info.player_count);
     return R_SUCCEEDED(rc) && info.player_count >= players;
 }
+
+/* The console's sockets, for the automatic update's HTTPS (gs/net_update.c: curl, its TLS the console's own): once,
+   when first needed (from the update's thread; the next calls only say how it went). 1 when they are up. */
+int Port_NxNetUp(void) {
+    static int state = -1;
+    if (state < 0) {
+        Result rc = socketInitializeDefault();
+        state = R_SUCCEEDED(rc);
+        fprintf(stderr, "bt3: network: %s (%#x)\n", state ? "up" : "the console's sockets could not start", (unsigned)rc);
+    }
+    return state;
+}
 #endif

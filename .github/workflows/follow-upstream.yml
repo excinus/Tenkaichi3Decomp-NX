@@ -1,0 +1,214 @@
+# Follows the original repository's releases (z3xox/Tenkaichi3Decomp) for the Switch (docs/port/switch_plan.md,
+# phase 5). Every 6 hours, or by hand (Actions > follow-upstream > Run workflow):
+#
+#   1. its newest published release (GitHub's "latest": no drafts, no pre-releases). Already in main: nothing to do.
+#   2. merged into main. This fork's workflows stay its own (.github/workflows: the merge keeps main's). A conflict
+#      anywhere else: nothing is pushed, and an issue says which files need a merge by hand.
+#   3. built (switch-build.yml), and the last Switch release built again beside it, in the same place, with the same
+#      number and key, to be compared file for file.
+#   4. decided:
+#        skip         the Switch's files are the same as the last release's: the update changes nothing there. The
+#                     merge is pushed (the next release will have it), nothing is published.
+#        pre-release  port/switch/release/classify.py found a reason to look first (the original changed lines next
+#                     to the Switch's own, the build's tools, new parts of the port, a big update), or the program
+#                     now leaves out functions it did not (stubs). Published as a pre-release, which games are not
+#                     offered, and an issue says why. To give it to the players: edit the release on GitHub and
+#                     untick "Set as a pre-release" (and tick "Set as the latest release").
+#        release      none of that: published, and every game is offered it.
+#      By hand, `kind` decides instead.
+#   The tag: v<the original's version>-nx1 (port/switch/release/next_version.sh).
+#
+# A failure (the merge, the build) opens an issue labelled upstream-follow, and that release is not tried again
+# while such an issue for it is open: close it (after merging by hand, say) to have it tried at the next run.
+# Pushing: GitHub refuses the workflow's own token a push of commits that change workflow files, and the original's
+# history has such commits now and then (even though the merge keeps this fork's): for those, the repository secret
+# FOLLOW_TOKEN, a fine-grained personal access token for this repository with "Contents" and "Workflows" read and
+# write, is used when it is set. Without it such a release fails with an issue that says so.
+name: follow-upstream
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      kind:
+        description: "What to publish (auto: decided as above)"
+        type: choice
+        options: [auto, release, prerelease, skip]
+        default: auto
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: follow-upstream
+  cancel-in-progress: false
+
+env:
+  UPSTREAM: z3xox/Tenkaichi3Decomp
+
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    outputs:
+      go: ${{ steps.m.outputs.go }}
+      upstream: ${{ steps.m.outputs.upstream }}
+      tag: ${{ steps.m.outputs.tag }}
+      sha: ${{ steps.m.outputs.sha }}
+      prev: ${{ steps.m.outputs.prev }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - id: m
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          up=$(gh api "repos/$UPSTREAM/releases/latest" --jq .tag_name)
+          echo "the original's newest release: $up"
+          echo "$up" | grep -Eq '^v[0-9]+(\.[0-9]+){1,3}$' || { echo "::error::$up is not a release number"; exit 1; }
+          git fetch --quiet --no-tags "https://github.com/$UPSTREAM.git" '+refs/tags/v*:refs/upstream-tags/v*'
+          if git merge-base --is-ancestor "refs/upstream-tags/$up" HEAD; then
+            echo "main has $up already: nothing to do"; echo "go=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if gh issue list --label upstream-follow --state open --limit 100 --json title --jq '.[].title' | grep -qF -e "$up " -e "$up)"; then
+            echo "an open issue is about $up: not tried again until it is closed"; echo "go=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          fork=$(git rev-parse HEAD)
+          base=$(git merge-base HEAD "refs/upstream-tags/$up")
+          if ! git merge --no-ff --no-commit "refs/upstream-tags/$up" > merge.txt 2>&1; then cat merge.txt; fi
+          # this fork's workflows stay its own: main's, the original's changes and new files there left out
+          for f in $( { git diff --name-only HEAD -- .github/workflows; git diff --name-only --diff-filter=U -- .github/workflows; } | sort -u); do
+            if git cat-file -e "HEAD:$f" 2>/dev/null; then git checkout HEAD -- "$f"; else git rm -q -f -- "$f"; fi
+          done
+          left=$(git diff --name-only --diff-filter=U)
+          if [ -n "$left" ]; then
+            git merge --abort
+            gh label create upstream-follow --color 5319e7 --description "follow-upstream.yml" 2>/dev/null || true
+            gh issue create --label upstream-follow --title "The original's $up does not merge by itself" --body "$(printf '%s\n\n%s\n\n%s\n%s\n\n%s' \
+              "follow-upstream.yml could not merge $UPSTREAM's release $up into main: these files conflict." \
+              "$(echo "$left" | sed 's/^/- /')" \
+              "Merge it by hand (git fetch https://github.com/$UPSTREAM.git tag $up; git merge $up), push to main, then close this issue." \
+              "The Switch release follows at the next run." \
+              "---
+          _Generated by follow-upstream.yml_")"
+            echo "go=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          git commit --quiet -m "Merge the original's release $up ($UPSTREAM) for the Switch" -m "By .github/workflows/follow-upstream.yml."
+          python3 port/switch/release/classify.py "$base" "$fork" "refs/upstream-tags/$up" --out reasons.txt
+          tag=$(sh port/switch/release/next_version.sh HEAD)
+          prev=$(git tag --merged HEAD --sort=-v:refname --list 'v*-nx*' | head -n 1)
+          git archive --format=tar.gz -o tree.tar.gz HEAD
+          git bundle create merge.bundle "$fork..HEAD"
+          { echo "go=true"; echo "upstream=$up"; echo "tag=$tag"; echo "sha=$(git rev-parse HEAD)"; echo "prev=$prev"; } >> "$GITHUB_OUTPUT"
+          echo "to publish: $tag (the last Switch release: ${prev:-none})"
+      - if: steps.m.outputs.go == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: follow-merge
+          path: |
+            tree.tar.gz
+            merge.bundle
+            reasons.txt
+          retention-days: 7
+
+  build:
+    needs: merge
+    if: needs.merge.outputs.go == 'true'
+    uses: ./.github/workflows/switch-build.yml
+    with:
+      version: ${{ needs.merge.outputs.tag }}
+      tree: follow-merge
+      compare_ref: ${{ needs.merge.outputs.prev }}
+    secrets: inherit
+
+  publish:
+    needs: [merge, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.FOLLOW_TOKEN || github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: follow-merge
+          path: merge
+      - uses: actions/download-artifact@v4
+        with:
+          name: switch-release
+          path: out
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          UP: ${{ needs.merge.outputs.upstream }}
+          TAG: ${{ needs.merge.outputs.tag }}
+          SHA: ${{ needs.merge.outputs.sha }}
+          SAME: ${{ needs.build.outputs.same }}
+          STUBS: ${{ needs.build.outputs.stubs }}
+          SIGNED: ${{ needs.build.outputs.signed }}
+          KIND: ${{ github.event.inputs.kind || 'auto' }}
+        run: |
+          set -e
+          cp merge/reasons.txt reasons.txt
+          if [ "${STUBS:-0}" -gt 0 ]; then
+            echo "the Switch program now leaves out $STUBS functions it did not (stubs): $(head -n 8 out/stubs_added.txt | tr '\n' ' ')" >> reasons.txt
+          fi
+          kind=$KIND
+          if [ "$kind" = auto ]; then
+            if [ "$SAME" = true ]; then kind=skip
+            elif [ -s reasons.txt ]; then kind=prerelease
+            else kind=release; fi
+          fi
+          echo "decided: $kind"; cat reasons.txt
+          # the merge onto main (only if main did not move meanwhile: then the next run starts again)
+          git fetch --quiet merge/merge.bundle HEAD
+          test "$(git rev-parse FETCH_HEAD)" = "$SHA"
+          if ! git push origin "$SHA:refs/heads/main" 2> push.txt; then
+            cat push.txt
+            if grep -q "workflow" push.txt; then
+              echo "::error title=FOLLOW_TOKEN needed::The original's history brings commits that change workflow files, which the workflow's own token may not push. Set the repository secret FOLLOW_TOKEN (see the top of follow-upstream.yml)."
+            fi
+            exit 1
+          fi
+          if [ "$kind" = skip ]; then
+            echo "::notice title=Nothing for the Switch::The original's $UP changes none of the Switch's files: merged into main, no release."
+            exit 0
+          fi
+          why=""; [ "$kind" = prerelease ] && why=reasons.txt
+          sh port/switch/release/notes.sh "$TAG" "$SHA" "" "$why" > notes.md
+          cat notes.md
+          sig=""; [ -f out/Tenkaichi3Decomp-switch.zip.sig ] && sig=out/Tenkaichi3Decomp-switch.zip.sig
+          gh release create "$TAG" --target "$SHA" --title "$TAG (Nintendo Switch)" --notes-file notes.md \
+            $( [ "$kind" = prerelease ] && echo --prerelease ) \
+            out/Tenkaichi3Decomp-switch-SD.zip out/Tenkaichi3Decomp-switch.zip $sig
+          [ "$SIGNED" = true ] || echo "::warning::$TAG is not signed: games will only say that it exists"
+          if [ "$kind" = prerelease ]; then
+            gh label create upstream-follow --color 5319e7 --description "follow-upstream.yml" 2>/dev/null || true
+            gh issue create --label upstream-follow --title "Check $TAG (the original's $UP) on a Switch" --body "$(printf '%s\n\n%s\n\n%s\n\n%s' \
+              "follow-upstream.yml published $TAG as a PRE-RELEASE: games are not offered it yet. Why it wants a look first:" \
+              "$(sed 's/^/- /' reasons.txt)" \
+              "Try it on a Switch (Tenkaichi3Decomp-switch-SD.zip of the release). If it is fine: edit the release, untick \"Set as a pre-release\", tick \"Set as the latest release\", and close this issue. If not: delete the release (and its tag), and fix main; the next Switch release (switch-release.yml) will have both." \
+              "---
+          _Generated by follow-upstream.yml_")"
+          fi
+
+  failed:
+    needs: [merge, build, publish]
+    if: failure() && needs.merge.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          UP: ${{ needs.merge.outputs.upstream }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh label create upstream-follow --repo "$GITHUB_REPOSITORY" --color 5319e7 --description "follow-upstream.yml" 2>/dev/null || true
+          gh issue create --repo "$GITHUB_REPOSITORY" --label upstream-follow --title "The Switch build of the original's $UP failed" \
+            --body "$(printf '%s\n\n%s\n\n%s' "follow-upstream.yml merged $UPSTREAM's release $UP but could not build or publish it for the Switch: $RUN (nothing was pushed unless the log says so)." "Fix main by hand (merge $UP, make it build), then close this issue: the next run tries again. If the log says that a workflow may not be changed (\"refusing to allow a GitHub App...\"): set the secret FOLLOW_TOKEN (the top of follow-upstream.yml), then close this issue." "---
+          _Generated by follow-upstream.yml_")"

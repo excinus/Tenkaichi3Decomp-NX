@@ -9,5 +9,10 @@
    Where releases are published: the game asks GitHub for the newest one once per start and can install it
    (gs/net_update.c, "Check for updates") and opens this repository's release page from the settings window. A fork that publishes
    its own releases names its own repository here. */
+#ifdef __SWITCH__
+/* the Switch: this fork's own releases (docs/port/switch_plan.md, phase 5), not the PC's */
+#define PORT_UPDATE_REPO "excinus/Tenkaichi3Decomp-NX"
+#else
 #define PORT_UPDATE_REPO "z3xox/Tenkaichi3Decomp"
+#endif
 #endif

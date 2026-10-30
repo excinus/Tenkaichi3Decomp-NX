@@ -34,46 +34,42 @@ As for macOS: players on Linux and Windows see no change. Everything for the Swi
 
 ## What the player gets
 
-The idea: the Switch version works like the PC one, automatic update included, and the folder on the SD card looks
-like the PC release folder, so that nothing has to be done differently when a new release comes out. An `.nsp`
-puts the game on the HOME menu once and is never updated; every update changes only the folder.
+The Switch version works like the PC one, automatic update included, and the folder on the SD card looks like the
+PC release folder. It is this fork's own release (excinus/Tenkaichi3Decomp-NX), not the original repository's: no
+Switch mode in the PC setup, no NSP (see "Releases (phase 5)").
 
-1. **The Switch package** (a release asset, beside the Linux and Windows ones): `Tenkaichi3Decomp-setup.exe` for the
-   PC (Linux: `Tenkaichi3Decomp-setup`), and the Switch programs it puts on the card.
-2. **The setup**, on the PC: choose the disc image (the same unmodified USA release as on PC) and the SD card (or any
-   folder, copied to the card later). It checks and unpacks the disc as the PC setup does and writes:
+1. **The release** (this fork's GitHub releases): `Tenkaichi3Decomp-switch-SD.zip`, the SD card's layout, for a
+   first install, with `INSTALL.txt`, and `Tenkaichi3Decomp-switch.zip` with its `.sig`, the game's folder, for the
+   automatic update:
 
    ```
    <SD>/atmosphere/contents/0100B73DEC000000/      the game's folder: the PC release folder, for the Switch
        Tenkaichi3Decomp          the game, an ELF                 (PC: Tenkaichi3Decomp / .exe)
        Tenkaichi3Decomp.dat      its data-table list              (PC: the same)
-       gamedata/                 unpacked from your disc; mods in gamedata/mods/
+       launcher.nro              the launcher's copy, which it takes from here when it differs
+       gamedata/                 the player's: the PC installation's, made by its setup from the player's disc
        saves/                    memory card saves (the PC's own format: copy them between PC and Switch)
        bt3_settings.txt, online_name.txt, ...
        fonts/ translations/ tbo/ textures/ songs/ stages/ licenses/ README.txt
-   <SD>/Tenkaichi3Decomp.nsp     (made once, see "The NSP"; install it and delete it)
+   <SD>/switch/Tenkaichi3Decomp.nro   the launcher, in the homebrew menu
    ```
 
-   No self-test (the program is for the Switch, not the PC). Adding the European languages later works as on PC.
-3. **Install the `.nsp` once** with a title installer (DB Installer, Goldleaf, Tinfoil, ...). The HOME menu has
-   *Tenkaichi3Decomp* with its icon from then on.
-4. **Play**: the HOME menu's icon starts the launcher in the NSP, which loads `Tenkaichi3Decomp` from the
-   folder (below). F1 is + and - together (the PC's START + SELECT), as on a PC controller.
-5. **Updates**: the game asks GitHub for the newest release as on PC; the asset is `Tenkaichi3Decomp-switch.zip`
-   (with its `.sig`), whose contents are the folder above without the player's files. The same rules as on PC: the
-   signature is checked, the player's files (`saves/`, `gamedata/`, `mods/`, settings, packs, songs, stages, the
-   player's font lines) are never written, and a failed install puts everything back. Restart now returns to the
-   launcher, which loads the new program; the console is not restarted and the NSP is not touched.
+2. **The game data**: the PC installation's `gamedata`, copied to the card, its folder of 65,000 voice files packed
+   into one by `pack_gamedata.py` (in the zip; "The packs").
+3. **Play**: the homebrew menu (opened through a game, holding R) starts the launcher, which loads `Tenkaichi3Decomp`
+   from the folder. F1 is + and - together (the PC's START + SELECT). sys-clk is required: the game sets the clocks
+   it needs itself (phase 4).
+4. **Updates**: the game asks this fork's GitHub releases for the newest one as on PC; the asset is
+   `Tenkaichi3Decomp-switch.zip` with its `.sig`. The same rules as on PC: the signature is checked, the player's
+   files (`saves/`, `gamedata/`, `mods/`, settings, packs, songs, stages, the player's font lines) are never
+   written, and a failed install puts everything back. Restart now installs it and ends the game into the launcher,
+   which says it is updated: the player starts it again (a second load in the same process is not safe, "The
+   launcher").
 
-Why the folder is under `atmosphere/contents/<title ID>`: it is the title's own place on the card, which Atmosphère
-looks at when the title starts. Atmosphère reads only `exefs/`, `exefs.nsp`, `romfs/`, `cheats/` and `flags/`
-there (to verify on the console: that nothing else is read or refused); the PC layout has none of these names. It
-also gives an escape hatch that needs no new NSP: a launcher placed at `exefs/main` + `exefs/main.npdm` in that
-folder replaces the one in the NSP (LayeredFS; unless L is held at start, Atmosphère's default).
-
-The title ID `0100B73DEC000000` ("BT3 DEC") is in the application range (ends in `000`). It has not yet been
-checked against a list of published titles: do that before the first Switch release, because from then on it is
-fixed (the folder, the NSP and the updater all depend on it).
+Why the folder is under `atmosphere/contents/<title ID>`: it is a title's own place on the card. Atmosphère reads only
+`exefs/`, `exefs.nsp`, `romfs/`, `cheats/` and `flags/` there; the PC layout has none of these names. The title ID
+`0100B73DEC000000` ("BT3 DEC") is in the application range (ends in `000`), and no published title has it: no base
+game, update or add-on of blawar's titledb (`versions.txt`, 63,323 entries, 2026-10-30) starts with `0100B73D`.
 
 ## How it runs
 
@@ -113,9 +109,12 @@ port/src/port_addr.h). So the NSP holds a small launcher in the manner of nx-hbl
 
 As built (phase 3) it is an .nro for the homebrew menu (`port/switch/launcher/build.sh` ->
 `port/build/switch/Tenkaichi3Decomp.nro`). When the game ends, its segments stay mapped and the launcher only shows
-the result and exits: the game's threads are not ended by its exit, and one could still run in its code. Restart now
-after an update (phase 5) is therefore planned as `appletRestartProgram` (the whole process anew) for the NSP, not
-as a second load in the same process.
+the result and exits: the game's threads are not ended by its exit, and one could still run in its code; and the
+heap pages under its segments stay mapped to the window, so a launcher loaded again in the same process (the homebrew
+loader's next-load) would find them gone. Restart now after an update (phase 5) therefore ends the game into the
+launcher, which says that the update is in (`update/restart.txt`) and exits; the player starts the game again. At
+each start the launcher also replaces its own .nro with the copy the release puts in the game's folder
+(`launcher.nro`), when that differs and is an NRO: the new file beside it first, then the swap.
 
 The program then maps the game's regions itself, at W + their PS2 addresses, as it does on every system
 (port/src/plat_mem.c, its Switch branch, the same calls): the heap 0x003BE000-0x02000000, its stack at 0x02000000,
@@ -251,7 +250,7 @@ an `.nro` from the homebrew menu through a game (hold R): the same folder, no HO
 | 2. The game builds for the Switch | `BT3_CC=nx64` compiles and links the whole game with libnx (`BT3_SKELETON=1`), in CI. **Done** (2026-10-29): `port/build/bt3_nx`; stubs for SDL3 and four system calls. |
 | 3. The demo fight on a console | The launcher loads the game; the attract-demo fight runs without a picture and its `BT3_HASH` lines (written to the card) equal Linux's (`compare_hash.py`). **Done** (2026-10-29): "battle finished", the fight's values the same as the PC's on all 4242 blanks of fighting. |
 | 4. Playable | The platform layer: picture (GL), sound, controllers; the game plays from boot to a fight and saves. **Done** (2026-10-30), with the CPU overclocked to 1785 MHz (sys-clk), which is a requirement: there everything checked works (menus, fights at a clean 30, HUD and effects, movies, saving, added songs and stages); at the stock 1020 MHz fights reach 16 to 20 pictures a second, unevenly paced (see "Results"). |
-| 5. The package | This fork's own releases (not the original repository's, and no Switch mode in its setup): `Tenkaichi3Decomp-switch.zip` in this fork's release workflow, signed with this fork's key; the updater's Switch asset from this fork's releases and its restart through the launcher; a workflow that follows the original repository's releases (merges them, builds, publishes the same version for the Switch). The `.nro` is the program to start (from the homebrew menu, or the HOME menu through a forwarder such as sphaira's); no NSP of its own ("The NSP"). |
+| 5. The package | This fork's own releases (not the original repository's, and no Switch mode in its setup), signed with this fork's key; the updater on the Switch (this fork's releases, HTTPS through the console's own TLS, the end into the launcher); a workflow that follows the original repository's releases and decides by itself whether to publish, pre-release or skip each. The `.nro` is the program to start (from the homebrew menu, or the HOME menu through a forwarder such as sphaira's); no NSP of its own ("The NSP"). **Built** (2026-10-30, "Releases (phase 5)"); done with the first release and an update installed by a game on a console. |
 | 6. Online | A lobby between a Switch and a PC, by code and by address. |
 
 Biggest risk: **speed**. The game's arithmetic is exact software float (the README asks for a recent mid-range PC
@@ -263,6 +262,45 @@ times. Whether that is full speed is known only when the game's own demo fight r
 field on Linux, multiplied by that, against the 16.7 ms of a field. If the console is too slow for full speed even with the renderer
 on another core, the options are the hot paths in faster exact code (the vector library in integer NEON),
 or a mode that skips drawing frames.
+
+## Releases (phase 5)
+
+All in this fork's GitHub Actions; the original repository's `release.yml` and `macos.yml` are not in the fork (it
+publishes no PC or Mac builds), and every merge of the original keeps the fork's `.github/workflows` as they are.
+
+- **Numbers**: `v<the original's version>-nx<n>`, the n-th Switch release of that version: `v0.1.39.2-nx1`, a fix
+  `v0.1.39.2-nx2`, the original's next `v0.1.40-nx1`. The game compares them as five numbers
+  (`port/src/gs/update_sign.c`: `-nx<n>` is the fifth, 0 without), so every Switch release is newer than the
+  original version it is built from and older than the original's next. The fork's tags never take the original's
+  names.
+- **The key**: the repository secret `UPDATE_SIGNING_KEY` (`python3 port/tools/update_key.py generate`, once; its
+  step about `update_key.h` does not apply here). The build takes its public half from the secret and compiles it
+  in (`BT3_UPDATE_KEY`, `port/src/update_key.h`, the Switch only); a game installs only what that key signed. It
+  must never change: games built with one key cannot check another's signatures (they would only say that a newer
+  release exists).
+- **The build** (`switch-build.yml`, `port/switch/release/build.sh`): SDL3, the game, the launcher (its version in
+  the homebrew menu is the release's), `package.py` (both zips), the signature.
+- **A release by hand** (`switch-release.yml`, Actions > switch-release > Run workflow): main (or the branch chosen),
+  the next number unless one is typed, notes typed in, optionally a pre-release. The notes
+  (`port/switch/release/notes.sh`) say which version of the original it is, how to install, and the fork's own
+  changes since the last Switch release; the game shows them as "What's new".
+- **Following the original** (`follow-upstream.yml`, every 6 hours or by hand): its newest published release, when
+  main does not have it, is merged; a conflict opens an issue (label `upstream-follow`) and nothing is pushed. The
+  merge is built, and so is the last Switch release's tree, at the same path with the same number and key (the
+  build is reproducible: two builds of one source were the same file for file, 2026-10-30), and the two are
+  compared (`port/switch/release/compare.py`). Then:
+  - **skip**: the Switch's files are the same: the merge goes to main, nothing is published;
+  - **pre-release**: `port/switch/release/classify.py` names a reason to look first (the original changed lines within
+    25 of the fork's own changes in the same file, both seen from their common commit, even where git merged them
+    without a conflict; the build's tools; new files in `port/src`; more than 4000 lines of code), or the program now
+    leaves out functions it did not (stubs). Published as a pre-release, which games are not offered (GitHub's
+    "latest release" is never one), with an issue that says why. Made a release by editing it on GitHub. For the
+    merge of 0.1.39.2 it would have said: `gs_draw.c`, `link.py` and `package.py` changed next to the Switch's lines;
+  - **release**: otherwise: published, and every game is offered it.
+  A failure opens an issue, and that version is not tried again while one about it is open. Pushing the merge:
+  GitHub refuses the workflow's own token commits that change workflow files, which the original's history has now
+  and then: the secret `FOLLOW_TOKEN` (a fine-grained token for this repository, Contents and Workflows read and
+  write) is used for the push when it is set.
 
 ## The game on a console (phase 4): how to run it
 

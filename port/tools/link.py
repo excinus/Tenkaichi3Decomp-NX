@@ -93,7 +93,9 @@ def link_nx(objs, extra):
     cmd = [dkp("gcc"), f"-specs={ROOT / 'port/switch/nx.specs'}"] + NX_ARCH + ["-w", "-o", str(EXE)] + extra + objs + [str(dyn)] + \
           ([f"-L{sdl3() / 'lib'}", "-lSDL3"] if sdl3() else []) + \
           ["-lEGL", "-lglapi", "-ldrm_nouveau"] + \
-          [f"-L{DEVKITPRO}/portlibs/switch/lib", f"-L{DEVKITPRO}/libnx/lib", "-lstdc++", "-lnx", "-lm",
+          [f"-L{DEVKITPRO}/portlibs/switch/lib", f"-L{DEVKITPRO}/libnx/lib", "-lstdc++",
+           "-lcurl", "-lz",  # (the automatic update's HTTPS: devkitPro's curl, its TLS the console's own)
+           "-lnx", "-lm",
            f"-Wl,--defsym=__start__={NX_WINDOW + 0x20000000:#x}", "-Wl,--wrap=main", f"-Wl,-Map={EXE}.map",
            "-Wl,--emit-relocs"] + \
           [f"-Wl,--wrap={f}" for f in NX_FS_WRAPPED]  # (kept for nx_reloc.py: the launcher may load the program into another window)

@@ -423,26 +423,70 @@ def portable(out):
 
 NX_OUT = ROOT / "port/build/release-switch"
 NX_ZIP = ROOT / "port/build/Tenkaichi3Decomp-switch.zip"
+NX_SD_ZIP = ROOT / "port/build/Tenkaichi3Decomp-switch-SD.zip"
 
-NX_README = """Dragon Ball Z: Budokai Tenkaichi 3 - port for the Nintendo Switch (Atmosphere homebrew). EXPERIMENTAL.
+NX_README = """Dragon Ball Z: Budokai Tenkaichi 3 - port for the Nintendo Switch (Atmosphere homebrew).
 
-This folder goes to the SD card as  atmosphere/contents/0100B73DEC000000/  (it is the game's folder, laid out as the
-PC release's). The game's data comes from your own disc: copy the gamedata folder of your PC installation here, or
-let the Switch setup make it from your disc image. Start it with the launcher (Tenkaichi3Decomp.nro from the homebrew
-menu, through a game: hold R while starting one) or, later, the NSP. See docs/port/switch_plan.md.
+This folder is the game's folder on the SD card:  atmosphere/contents/0100B73DEC000000/  (laid out as the PC
+release's). The game's data comes from your own disc: copy the gamedata folder of your PC installation of
+Tenkaichi3Decomp here (its setup made it from your disc). Start the game with Tenkaichi3Decomp from the homebrew menu
+(sdmc:/switch/Tenkaichi3Decomp.nro), opened THROUGH A GAME (hold R while starting one). INSTALL.txt in the release's
+SD card zip says all of it step by step.
 
-Controllers: by position, as a PS2 pad (B is Cross, A is Circle, Y is Square, X is Triangle; L/R and ZL/ZR are
-L1/R1 and L2/R2). + and - pressed together open the settings window (the PC's F1): the D-pad moves, B (Cross)
-selects, A (Circle) goes back, L/R change the tab, the touch screen works as a mouse; "Exit game" ends the game.
+sys-clk is REQUIRED for full speed: with it installed the game sets the clocks it needs by itself while it runs and
+gives them back when it is not in front (F1 window > Video: "Overclock while playing").
+
+Controllers: in fights by position, as a PS2 pad (B is Cross, A is Circle, Y is Square, X is Triangle; L/R and ZL/ZR
+are L1/R1 and L2/R2); in the menus A chooses and B goes back (Controls: "Nintendo layout in the menus"). + and -
+pressed together open the settings window (the PC's F1): the D-pad moves, L/R change the tab, the touch screen works
+as a mouse; "Exit game" ends the game. 1P vs 2P opens the console's Controllers screen: a Joy-Con each, held
+sideways, or two controllers.
 Saves are kept in saves/, as on the PC: they can be copied between the two. A file placed in gamedata/mods/<same
 path as the original> replaces the original. Texture packs (PCSX2 naming) go into textures/, stages and music from
 outside the disc into stages/ and songs/: see the note in each folder.
+Updates: the game says when a new release is out (F1 window > Update now, then Restart now); your saves, settings,
+game data and mods are not touched. launcher.nro is the launcher's copy that it takes from here by itself.
 
 This package contains no game data.
 
 The port's own code is under the GNU AGPL, version 3 (licenses/tenkaichi3decomp-agpl.txt; code from before the
 change of licence also under MIT, licenses/tenkaichi3decomp-mit.txt). The libraries it is built with, and their
-licences: licenses/. Its source, this release's tag included: https://github.com/z3xox/Tenkaichi3Decomp
+licences: licenses/. Its source, this release's tag included: https://github.com/excinus/Tenkaichi3Decomp-NX (the
+Switch's), from https://github.com/z3xox/Tenkaichi3Decomp (the port's).
+"""
+
+NX_INSTALL = """Tenkaichi3Decomp for the Nintendo Switch - installing
+
+What you need:
+  - a Switch with Atmosphere (custom firmware) and the homebrew menu;
+  - sys-clk (the homebrew clock manager): REQUIRED. The game sets the clocks it needs by itself while it runs
+    (CPU 1785 MHz, memory 1600 MHz, GPU 921 MHz docked or charging, 614 MHz on the battery) and gives them back when
+    it is not in front. Without it fights run at 16 to 20 pictures a second, unevenly;
+  - your PC installation of Tenkaichi3Decomp, made by its setup from YOUR OWN disc: its gamedata folder. This
+    package contains no game data;
+  - Python 3 on the PC (the PC setup's is fine), for step 3.
+
+1. Copy the folders of this zip to the root of the SD card: atmosphere/ and switch/ (they merge with what is there).
+2. Copy the gamedata folder of your PC installation into  atmosphere/contents/0100B73DEC000000/  on the card,
+   next to the file Tenkaichi3Decomp (so that atmosphere/contents/0100B73DEC000000/gamedata/disc/SLUS_216.78 exists).
+   Its files are large: the card needs exFAT if any file is over 4 GB.
+3. Once, with the card in the PC: pack the folder of 65,000 files (gamedata/pzs3us2) into one file. The Switch takes
+   about 0.4 s to open a file in that folder: without the pack the menus and fights stop at every spoken line. In a
+   command prompt in this zip's folder (F: is the card here):
+       python pack_gamedata.py F:\\atmosphere\\contents\\0100B73DEC000000\\gamedata --delete
+   It writes gamedata/pzs3us2.afs (the same data in one file, checked), then removes the folder. A few minutes.
+   (Do not run it with --delete on the PC's own gamedata: the PC needs the folder.) It can also write the pack from
+   the PC's gamedata straight onto the card, which then needs no copy of that folder:
+       python pack_gamedata.py C:\\path\\to\\Tenkaichi3Decomp\\gamedata --out F:\\atmosphere\\contents\\0100B73DEC000000\\gamedata
+4. On the Switch, open the homebrew menu THROUGH A GAME (hold R while starting any game; from the album there is not
+   enough memory), then start Tenkaichi3Decomp.
+
+Updates come by themselves: the game says when a new release is out (+ and - together > Update now, then Restart
+now, then start the game again). Your saves and settings are not touched. To update by hand instead, copy a newer
+release's zip over the card in the same way (steps 2 and 3 are not needed again).
+
+If something goes wrong, the game's folder has bt3_log.txt (and bt3_crash.txt after a crash): send those with the
+report. Saves are in saves/ in the game's folder, as on the PC: copy them between PC and Switch.
 """
 
 NX_LIBRARIES = """The Switch program (Tenkaichi3Decomp) is linked with these libraries besides the port's own (see the
@@ -462,8 +506,11 @@ def main_nx():
     """BT3_CC=nx64: the game's folder for the Switch (docs/port/switch_plan.md), laid out as the PC release folder: the
     program (an ELF the launcher loads) with its lists (.dat, .mem, .rel), the screen reader's lines, translations,
     fonts, the online screens' pictures, the notes of textures/, songs/, stages/, README.txt, licenses/. It goes to
-    atmosphere/contents/0100B73DEC000000/ on the SD card; the zip is what the automatic update will take. The
-    launcher (port/switch/launcher) is not in it."""
+    atmosphere/contents/0100B73DEC000000/ on the SD card; the zip is what the automatic update takes. With the
+    launcher built (port/switch/launcher/build.sh, before this), its copy launcher.nro is in it (the launcher takes it
+    from there), and a second zip has the SD card's whole layout for a first install (Tenkaichi3Decomp-switch-SD.zip:
+    atmosphere/, switch/Tenkaichi3Decomp.nro, pack_gamedata.py, INSTALL.txt). BT3_NX_LAUNCHER=1: an error without it
+    (a release)."""
     import toolchain
     exe = toolchain.EXE
     for need in (exe, pathlib.Path(str(exe) + ".rel")):
@@ -478,6 +525,11 @@ def main_nx():
     take_lang(NX_OUT)
     take_translations(NX_OUT)
     (NX_OUT / "README.txt").write_text(NX_README)
+    launcher = ROOT / "port/build/switch/Tenkaichi3Decomp.nro"
+    if launcher.exists():
+        shutil.copy2(launcher, NX_OUT / "launcher.nro")
+    elif os.environ.get("BT3_NX_LAUNCHER") == "1":
+        sys.exit("missing port/build/switch/Tenkaichi3Decomp.nro: build the launcher first (port/switch/launcher/build.sh)")
     lic = NX_OUT / "licenses"
     lic.mkdir()
     shutil.copy2(ROOT / "LICENSE", lic / "tenkaichi3decomp-agpl.txt")
@@ -505,6 +557,20 @@ def main_nx():
                 info.compress_type = zipfile.ZIP_DEFLATED
                 z.writestr(info, p.read_bytes(), compresslevel=9)
     print(f"{NX_ZIP.relative_to(ROOT)}: {NX_ZIP.stat().st_size / 1e6:.1f} MB")
+    if NX_SD_ZIP.exists():
+        NX_SD_ZIP.unlink()
+    if launcher.exists():
+        with zipfile.ZipFile(NX_SD_ZIP, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+            for p in sorted(NX_OUT.rglob("*")):
+                if p.is_file():
+                    z.writestr(zipfile.ZipInfo.from_file(p, "atmosphere/contents/0100B73DEC000000/" + str(p.relative_to(NX_OUT))),
+                               p.read_bytes(), compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
+            z.writestr(zipfile.ZipInfo.from_file(launcher, "switch/Tenkaichi3Decomp.nro"), launcher.read_bytes(),
+                       compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
+            pack = ROOT / "port/switch/pack_gamedata.py"
+            z.writestr(zipfile.ZipInfo.from_file(pack, "pack_gamedata.py"), pack.read_bytes(), compress_type=zipfile.ZIP_DEFLATED)
+            z.writestr("INSTALL.txt", NX_INSTALL.replace("\n", "\r\n"), compress_type=zipfile.ZIP_DEFLATED)
+        print(f"{NX_SD_ZIP.relative_to(ROOT)}: {NX_SD_ZIP.stat().st_size / 1e6:.1f} MB (the SD card's layout, for a first install)")
 
 if os.environ.get("BT3_CC") == "win64":
     main_win()

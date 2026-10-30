@@ -76,12 +76,11 @@ jobs:
           python3 port/tools/link.py 2>&1 | tee port/build/link_nx64.txt
           test -f port/build/bt3_nx
           echo "functions the Switch does not have yet (stubs): $(wc -l < port/build/stubs.txt)"
+          sh port/switch/launcher/build.sh --here
           python3 port/tools/package.py
 
-      - name: Launcher and test kit
-        run: |
-          sh port/switch/launcher/build.sh --here
-          sh port/switch/test_kit.sh
+      - name: Test kit
+        run: sh port/switch/test_kit.sh
 
       - uses: actions/upload-artifact@v4
         if: always()

@@ -1,0 +1,158 @@
+# A Switch release's build (docs/port/switch_plan.md, phase 5), called by switch-release.yml (a release by hand) and
+# follow-upstream.yml (a release of the original repository's update): port/switch/release/build.sh in devkitPro's
+# container, the zips signed, and kept as the artifact `switch-release`:
+#   Tenkaichi3Decomp-switch.zip (+ .sig)   the game's folder: what the game's automatic update installs
+#   Tenkaichi3Decomp-switch-SD.zip         the SD card's layout, for a first install
+#
+# The signing key: the repository secret UPDATE_SIGNING_KEY (made once with `python3 port/tools/update_key.py
+# generate`). Its public half is compiled into the game (BT3_UPDATE_KEY, port/src/update_key.h): a game installs only
+# what that key signed. Without the secret the release is built all the same, unsigned and with no key: games then
+# only say that a newer release exists.
+#
+# compare_ref (follow-upstream.yml): the last release's tag. Its tree is built too, first, in the same place and with
+# the same number and key, and port/switch/release/compare.py says whether the new one differs at all for the Switch
+# (output `same`) and which functions it newly leaves out (output `stubs`, the count; stubs_added.txt in the artifact).
+name: switch-build
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: "the release's tag (v0.1.39.2-nx1)"
+        type: string
+        required: true
+      tree:
+        description: "an artifact holding the source as tree.tar.gz (follow-upstream.yml's merge); empty: `ref`"
+        type: string
+        default: ""
+      ref:
+        description: "the commit to build when there is no `tree`"
+        type: string
+        default: ""
+      compare_ref:
+        description: "the last release's tag, built too and compared"
+        type: string
+        default: ""
+    outputs:
+      same:
+        description: "true: the new build's files are the last release's, file for file"
+        value: ${{ jobs.build.outputs.same }}
+      stubs:
+        description: "how many functions the new program leaves out that the last one did not"
+        value: ${{ jobs.build.outputs.stubs }}
+      signed:
+        description: "true: the zip is signed (the secret is set)"
+        value: ${{ jobs.build.outputs.signed }}
+    secrets:
+      UPDATE_SIGNING_KEY:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    container: devkitpro/devkita64:latest
+    outputs:
+      same: ${{ steps.compare.outputs.same }}
+      stubs: ${{ steps.compare.outputs.stubs }}
+      signed: ${{ steps.sign.outputs.signed }}
+    env:
+      BT3_VERSION: ${{ inputs.version }}
+    steps:
+      # LLVM 22 with its Python bindings, as in switch.yml
+      - name: Tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends curl ca-certificates gnupg python3 git
+          curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key | gpg --dearmor -o /usr/share/keyrings/llvm.gpg
+          echo "deb [signed-by=/usr/share/keyrings/llvm.gpg] http://apt.llvm.org/bookworm/ llvm-toolchain-bookworm-22 main" > /etc/apt/sources.list.d/llvm.list
+          apt-get update
+          apt-get install -y --no-install-recommends clang-22 llvm-22 llvm-22-dev libclang-22-dev python3-clang-22
+
+      - name: The source (a commit)
+        if: inputs.tree == ''
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          path: src
+      - name: The source (the merge)
+        if: inputs.tree != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.tree }}
+          path: tree
+      - if: inputs.tree != ''
+        run: mkdir src && tar -xzf tree/tree.tar.gz -C src
+      - name: The last release's source
+        if: inputs.compare_ref != ''
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.compare_ref }}
+          path: old
+
+      - name: The signing key's public half
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: |
+          if [ -n "$UPDATE_SIGNING_KEY" ]; then
+            echo "BT3_UPDATE_KEY=$(python3 src/port/tools/update_key.py public)" >> "$GITHUB_ENV"
+          else
+            echo "::warning title=Unsigned release::The secret UPDATE_SIGNING_KEY is not set: this build has no update key and its zip is not signed (games only say that a newer release exists). See docs/port/switch_plan.md, phase 5."
+          fi
+
+      # (both trees built at the same path, t/: the program holds a few of its source files' paths)
+      - name: Build the last release, for the comparison
+        if: inputs.compare_ref != ''
+        run: |
+          mv old t
+          sh src/port/switch/release/build.sh t
+          mkdir old-build
+          mv t/port/build/release-switch t/port/build/stubs.txt old-build/
+          rm -rf t
+      - name: Build
+        run: |
+          mv src t
+          sh t/port/switch/release/build.sh t
+          echo "functions the Switch does not have (stubs): $(wc -l < t/port/build/stubs.txt)"
+      - name: Compare
+        id: compare
+        if: inputs.compare_ref != ''
+        run: python3 t/port/switch/release/compare.py old-build t/port/build --out "$GITHUB_OUTPUT"
+
+      - name: Sign
+        id: sign
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: |
+          if [ -n "$UPDATE_SIGNING_KEY" ]; then
+            cd t
+            python3 port/tools/update_key.py sign --any-key port/build/Tenkaichi3Decomp-switch.zip
+            python3 port/tools/update_key.py verify port/build/Tenkaichi3Decomp-switch.zip --public "$BT3_UPDATE_KEY"
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: switch-release
+          path: |
+            t/port/build/Tenkaichi3Decomp-switch.zip
+            t/port/build/Tenkaichi3Decomp-switch.zip.sig
+            t/port/build/Tenkaichi3Decomp-switch-SD.zip
+            t/port/build/stubs.txt
+            t/port/build/stubs_added.txt
+          if-no-files-found: warn
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: switch-release-logs
+          path: |
+            t/port/build/*_nx64.txt
+            t/port/build/bt3_nx.map
+          if-no-files-found: ignore
+          retention-days: 30

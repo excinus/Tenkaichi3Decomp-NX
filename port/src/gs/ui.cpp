@@ -1602,6 +1602,18 @@ static void upd_fill(char *out, size_t size, const char *id, const char *english
         }
     }
     out[n] = '\0';
+#ifdef __SWITCH__
+    for (char *f1 = SDL_strstr(out, "F1"); f1 != NULL; f1 = SDL_strstr(f1, "F1")) { // (the window's keys there: + and -)
+        size_t rest = SDL_strlen(f1 + 2);
+        if (n + 1 + 3 - 2 > size) {
+            break;
+        }
+        SDL_memmove(f1 + 3, f1 + 2, rest + 1);
+        SDL_memcpy(f1, "+/-", 3);
+        n += 1;
+        f1 += 3;
+    }
+#endif
 }
 
 static int upd_percent(const UpdateStatus &u) {
@@ -1623,10 +1635,7 @@ static void upd_restart(void) {
 
 static void update_tick(void) {
     if (sUpdCheck < 0) {
-        sUpdCheck = Port_Setting("update_check", 1) != 0;
-#ifdef __SWITCH__
-        sUpdCheck = 0; // (not the PC's releases: the Switch's updates are phase 5's, docs/port/switch_plan.md)
-#endif
+        sUpdCheck = Port_Setting("update_check", 1) != 0; // (the Switch: this fork's releases, port_release.h)
     }
     if (!sReady) {
         return;
@@ -1759,9 +1768,14 @@ static void update_panel(void) {
         if (busy) {
             ImGui::EndDisabled();
         }
+#ifdef __SWITCH__
+        ImGui::SetItemTooltip("Installs the update over the game's folder (if anything goes wrong, every file is put\n"
+                              "back) and ends the game: then start it again. Your saves and settings are not touched.");
+#else
         ImGui::SetItemTooltip(busy ? "Not during an online session: finish it first."
                                    : "Installs the update over the game's folder and starts the new version (if anything\n"
                                      "goes wrong, every file is put back). Your saves and settings are not touched.");
+#endif
         ImGui::SameLine();
     } else if (u.state == UPD_FAILED && u.canInstall) {
         if (ImGui::Button("Try again")) {
@@ -1772,11 +1786,15 @@ static void update_panel(void) {
     if (ImGui::Button(sUpdNotes ? "Hide what's new" : "What's new")) {
         sUpdNotes = !sUpdNotes;
     }
+#ifdef __SWITCH__
+    ImGui::TextDisabled("Release page: %s", u.page); // (no browser to open it in)
+#else
     ImGui::SameLine();
     if (ImGui::Button("Release page")) {
         SDL_OpenURL(u.page);
     }
     ImGui::SetItemTooltip("Opens the release page in your browser. To update by hand, copy the new files over the old ones.");
+#endif
     if (!u.canInstall && u.cannot[0] != '\0') {
         ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
         ImGui::TextWrapped("%s", u.cannot);
@@ -1802,7 +1820,6 @@ static void update_panel(void) {
 }
 
 static void misc_tab(void) {
-#ifndef __SWITCH__ // (the Switch's updates come with phase 5 of docs/port/switch_plan.md: its own package, not the PC's)
     {
         bool chk = sUpdCheck != 0;
         if (ImGui::Checkbox("Check for updates", &chk)) {
@@ -1816,7 +1833,6 @@ static void misc_tab(void) {
         ImGui::TextDisabled("(installed: %s)", Update_Version()); // (PR #107: the version that is running)
         ImGui::SetItemTooltip("The version of Tenkaichi3Decomp currently running (\"dev\": built locally, never offered updates).");
     }
-#endif
     // the start of the game (PR #50): read by FirstRun_Main, so they count from the next start
     static int sSkipLogos = -1, sSkipIntro = -1, sSkipCopy = -1;
     if (sSkipLogos < 0) {

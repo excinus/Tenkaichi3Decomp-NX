@@ -18,7 +18,9 @@ for f in port/switch/launcher/source/main.c port/switch/launcher/source/trampoli
 done
 $CC -specs=$DEVKITPRO/libnx/switch.specs $ARCH -o $O/launcher.elf $O/main.c.o $O/trampoline.s.o -L$DEVKITPRO/libnx/lib -lnx || exit 1
 # (the icon: the game's cover, 256 x 256, port/switch/launcher/icon.jpg, as the homebrew menu shows it)
-$DEVKITPRO/tools/bin/nacptool --create "Dragon Ball Z: Budokai Tenkaichi 3" "Tenkaichi3Decomp" "phase 4" $O/launcher.nacp || exit 1
+# (the version the homebrew menu shows: the release's, BT3_VERSION as for the game; "dev" for a local build)
+V=$(printf '%s' "${BT3_VERSION:-dev}" | sed 's/^[vV]//' | tr -cd 'A-Za-z0-9._-' | cut -c1-15)
+$DEVKITPRO/tools/bin/nacptool --create "Dragon Ball Z: Budokai Tenkaichi 3" "Tenkaichi3Decomp" "${V:-dev}" $O/launcher.nacp || exit 1
 $DEVKITPRO/tools/bin/elf2nro $O/launcher.elf port/build/switch/Tenkaichi3Decomp.nro --nacp=$O/launcher.nacp \
     --icon=port/switch/launcher/icon.jpg || exit 1
 echo "built port/build/switch/Tenkaichi3Decomp.nro"

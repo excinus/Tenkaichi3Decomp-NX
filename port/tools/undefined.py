@@ -216,6 +216,12 @@ def main():
             raise SystemExit("FAILED BT3_UPDATE_TEST_KEY: 64 hex digits (an Ed25519 public key)")
         head += f'#define PORT_UPDATE_TEST_KEY "{test_key}"\n'
         print("update key: a TEST key (BT3_UPDATE_TEST_KEY), not for a release")
+    build_key = os.environ.get("BT3_UPDATE_KEY", "").strip().lower()
+    if build_key:  # the Switch release's own key (port/src/update_key.h), from .github/workflows/switch-release.yml
+        if not re.fullmatch(r"[0-9a-f]{64}", build_key):
+            raise SystemExit("FAILED BT3_UPDATE_KEY: 64 hex digits (an Ed25519 public key)")
+        head += f'#define PORT_UPDATE_KEY_BUILD "{build_key}"\n'
+        print(f"update key: {build_key[:16]}... (BT3_UPDATE_KEY)")
     if not (gen / "port_version.h").exists() or (gen / "port_version.h").read_text() != head:
         (gen / "port_version.h").write_text(head)
     arrays = []

@@ -18,6 +18,11 @@
  *      makes the game's folder its working folder), and when it ends takes the services again and shows how it ended
  *      with the end of its log (bt3_log.txt).
  *
+ * The automatic update (port/src/gs/net_update.c, phase 5 of the plan) replaces the game's folder; this launcher takes
+ * the copy of itself the release puts there (launcher.nro) at its next start, and when the game ends after
+ * installing an update (update/restart.txt) it says so: the game is then started again by the player, as a second
+ * load in the same process is not safe (the first one's memory stays mapped, and its threads may still run).
+ *
  * The game maps its own memory regions inside the window (port/src/plat_mem.c). Built as an .nro to start from the
  * homebrew menu (port/switch/launcher/build.sh); later the same program is the NSP's (phase 5 of the plan).
  */
@@ -513,6 +518,88 @@ static int test_run(const char *folder) {
     return test;
 }
 
+/* The release's copy of this launcher (launcher.nro in the game's folder, which the automatic update keeps new) put in
+   this one's place when it differs, for the next start: the new file beside it first, then the swap, the old one
+   back when that fails. Only for an .nro on the SD card (the homebrew menu's or a forwarder's path). */
+static void launcher_update(const char *folder, const char *self) {
+    char path[PATH_SIZE], fresh[PATH_SIZE], old[PATH_SIZE];
+    size_t n = strlen(self), size[2] = {0, 0};
+    char *data[2] = {NULL, NULL};
+    const char *from[2];
+    FILE *f;
+    int i, same;
+
+    if (strncmp(self, "sdmc:/", 6) != 0 || n < 5 || strcmp(self + n - 4, ".nro") != 0) {
+        return;
+    }
+    snprintf(path, sizeof(path), "%s/launcher.nro", folder);
+    if (strcmp(path, self) == 0) {
+        return;
+    }
+    from[0] = path;
+    from[1] = self;
+    for (i = 0; i < 2; i++) {
+        long len;
+        if ((f = fopen(from[i], "rb")) == NULL) {
+            break;
+        }
+        fseek(f, 0, SEEK_END);
+        len = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        data[i] = len > 0 && len < (64 << 20) ? (char *)malloc((size_t)len) : NULL;
+        size[i] = data[i] != NULL ? fread(data[i], 1, (size_t)len, f) : 0;
+        fclose(f);
+        if (data[i] == NULL || size[i] != (size_t)len) {
+            break;
+        }
+    }
+    same = i < 2 || (size[0] == size[1] && memcmp(data[0], data[1], size[0]) == 0); /* (or not readable: left alone) */
+    if (!same && size[0] > 0x80 && memcmp(data[0] + 0x10, "NRO0", 4) == 0) {
+        snprintf(fresh, sizeof(fresh), "%s.new", self);
+        snprintf(old, sizeof(old), "%s.old", self);
+        f = fopen(fresh, "wb");
+        if (f != NULL && fwrite(data[0], 1, size[0], f) == size[0] && fclose(f) == 0) {
+            f = NULL;
+            remove(old);
+            if (rename(self, old) == 0) {
+                if (rename(fresh, self) == 0) {
+                    remove(old);
+                } else {
+                    rename(old, self);
+                }
+            }
+        }
+        if (f != NULL) {
+            fclose(f);
+        }
+        remove(fresh);
+    }
+    free(data[0]);
+    free(data[1]);
+}
+
+/* The game ended after installing an update (port/src/gs/net_update.c, Update_Relaunch): 1 when it did, said. */
+static int updated(const char *folder) {
+    char path[PATH_SIZE], ver[40] = "";
+    FILE *f;
+
+    snprintf(path, sizeof(path), "%s/update/restart.txt", folder);
+    if ((f = fopen(path, "r")) == NULL) {
+        return 0;
+    }
+    if (fgets(ver, sizeof(ver), f) == NULL) {
+        ver[0] = '\0';
+    }
+    fclose(f);
+    remove(path);
+    ver[strcspn(ver, "\r\n")] = '\0';
+    screen_open();
+    printf(CONSOLE_YELLOW "Tenkaichi3Decomp" CONSOLE_RESET "\n\n" CONSOLE_GREEN "Updated to %s." CONSOLE_RESET "\n\n"
+           "Start the game again to play the new version.\n", ver[0] != '\0' ? ver : "the new version");
+    wait_plus();
+    return 1;
+}
+
 /* A crash ends the whole process (the game's report, port/src/plat_crash.c, then the system), so it is told at the
    next start: the report's first lines, then A starts the game anyway (the report kept as bt3_crash_prev.txt). */
 static int crash_notice(const char *folder) {
@@ -565,6 +652,9 @@ int main(int argc, char **argv) {
                     "  next to this launcher, as " PROGRAM ",\n  and as " TITLE_FOLDER "/" PROGRAM "\n"
                     "Copy the game's folder to the SD card (docs/port/switch_plan.md).\n");
     }
+    if (argc > 0 && argv[0] != NULL) {
+        launcher_update(folder, argv[0]);
+    }
     if (!crash_notice(folder)) {
         return 0;
     }
@@ -604,6 +694,9 @@ int main(int argc, char **argv) {
 
     t0 = armGetSystemTick();
     r = run(self, entry);
+    if (r == 0 && updated(folder)) {
+        return 0;
+    }
     if (r == 0 && !test_run(folder)) {
         return 0; /* (played and left with Exit game: straight back to the menu) */
     }
