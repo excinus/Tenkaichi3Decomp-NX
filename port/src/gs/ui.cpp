@@ -8,6 +8,9 @@
 #include <string.h>
 #include <stdint.h>
 #include "imgui.h"
+#ifdef __SWITCH__
+#include "imgui_internal.h" // (ImGui::ClearActiveID: a text field handed to the console's keyboard)
+#endif
 #include "imgui_impl_sdl3.h"
 #include "imgui_impl_sdlgpu3.h"
 #include "imgui_impl_opengl3.h"
@@ -80,6 +83,7 @@ void Port_MenuAbSwapSet(int on);
 int Port_NxControllers(int players);           // plat_nxpad.c: the console's Controllers screen
 void Port_NxClockSet(int on);                  // plat_nxclock.c: the game's clocks through sys-clk
 int Port_NxClockThere(void);
+int Port_NxKeyboard(const char *header, char *text, size_t size, int digits); // plat_nxpad.c: the console's keyboard
 #endif
 int Port_ClashSquareX(void);                   // what a press is worth, in quarters of a point (4, 6, 7, 8)
 void Port_ClashSquareXSet(int quarters);
@@ -814,6 +818,33 @@ static void quick_status(int state, int &lastState, const char *name) {
     }
 }
 
+// The Switch has no keyboard: a text field of the window just drawn, once chosen, is typed on the console's keyboard
+// instead (its text shown there and replaced). true: something was typed. code: kept to letters and digits, as capitals.
+static bool nx_type(const char *header, char *buf, size_t size, bool digits = false, bool code = false) {
+#ifdef __SWITCH__
+    if (!ImGui::IsItemActivated()) {
+        return false;
+    }
+    ImGui::ClearActiveID();
+    if (!Port_NxKeyboard(header, buf, size, digits)) {
+        return false;
+    }
+    if (code) {
+        size_t n = 0;
+        for (const char *c = buf; *c != '\0'; c++) {
+            if ((*c >= '0' && *c <= '9') || (*c >= 'A' && *c <= 'Z') || (*c >= 'a' && *c <= 'z')) {
+                buf[n++] = (char)(*c >= 'a' ? *c - 32 : *c);
+            }
+        }
+        buf[n] = '\0';
+    }
+    return true;
+#else
+    (void)header, (void)buf, (void)size, (void)digits, (void)code;
+    return false;
+#endif
+}
+
 static void build_net(void) {
     static char name[17] = "Player", address[64] = "", port[8] = "7000";
     static int tab, roll = -1, delay = 1, battle = -1, timeLimit = 3, speed = -1;
@@ -835,11 +866,15 @@ static void build_net(void) {
                 ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.55f, 0.35f, 1.0f));
                 ImGui::TextWrapped("Update available. Online servers are unreachable until you update.");
                 ImGui::PopStyleColor();
-                ImGui::TextDisabled("You have 0.%d.%d; 0.%d.%d or newer is needed. github.com/z3xox/Tenkaichi3Decomp/releases", mine / 100, mine % 100, min / 100, min % 100);
+                ImGui::TextDisabled("You have 0.%d.%d; 0.%d.%d or newer is needed. github.com/" PORT_UPDATE_REPO "/releases", mine / 100, mine % 100, min / 100, min % 100);
                 ImGui::Separator();
             } else if (latest > mine) {
                 ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.3f, 1.0f), "Update available: release 0.%d.%d.", latest / 100, latest % 100);
-                ImGui::TextDisabled("F1 to update, or github.com/z3xox/Tenkaichi3Decomp/releases");
+#ifdef __SWITCH__
+                ImGui::TextDisabled("+ and - to update, or github.com/" PORT_UPDATE_REPO "/releases");
+#else
+                ImGui::TextDisabled("F1 to update, or github.com/" PORT_UPDATE_REPO "/releases");
+#endif
                 ImGui::Separator();
             }
             if (Port_OnlineBlocked() != NULL) { // an update is under way (gs/net_update.c): no new session starts
@@ -861,7 +896,7 @@ static void build_net(void) {
             }
         }
         ImGui::InputText("Player name", name, sizeof(name));
-        if (ImGui::IsItemDeactivatedAfterEdit()) {
+        if (nx_type("Player name", name, sizeof(name)) || ImGui::IsItemDeactivatedAfterEdit()) {
             Port_SettingTextSave("net_name", name);
             Port_SettingsWrite();
         }
@@ -884,6 +919,7 @@ static void build_net(void) {
                 ImGui::BeginDisabled(useCode);
                 ImGui::SetNextItemWidth(U(120.0f));
                 ImGui::InputText("Port", port, sizeof(port), ImGuiInputTextFlags_CharsDecimal);
+                nx_type("Port", port, sizeof(port), true);
                 ImGui::EndDisabled();
                 if (roll < 0) { // the choices of last time (new names: the first ones' defaults were 4 frames and delay 1)
                     roll = Port_RollCan() ? Port_Setting("net_rollback2", 8) / 2 : 0;
@@ -990,6 +1026,8 @@ static void build_net(void) {
                 tab = 1;
                 ImGui::SetNextItemWidth(U(120.0f));
                 ImGui::InputText("Room code", roomCode, sizeof(roomCode), ImGuiInputTextFlags_CharsUppercase | ImGuiInputTextFlags_CharsNoBlank);
+                nx_type("Room code", roomCode, sizeof(roomCode), false, true);
+#ifndef __SWITCH__ // (no clipboard there)
                 ImGui::SameLine();
                 if (ImGui::Button("Paste")) { // the letters and digits of what was copied, as capitals
                     char *clip = SDL_GetClipboardText();
@@ -1002,12 +1040,15 @@ static void build_net(void) {
                     roomCode[n] = '\0';
                     SDL_free(clip);
                 }
+#endif
                 ImGui::TextDisabled("or, without a code, the host's address and port:");
                 ImGui::BeginDisabled(roomCode[0] != '\0');
                 ImGui::SetNextItemWidth(U(260.0f));
                 ImGui::InputText("Host's address", address, sizeof(address));
+                nx_type("Host's address", address, sizeof(address));
                 ImGui::SetNextItemWidth(U(120.0f));
                 ImGui::InputText("Port", port, sizeof(port), ImGuiInputTextFlags_CharsDecimal);
+                nx_type("Port", port, sizeof(port), true);
                 ImGui::EndDisabled();
                 ImGui::EndTabItem();
             }

@@ -2476,6 +2476,10 @@ static void join_address(const char *address, int port) {
     a.sin_port = htons((uint16_t)port);
     if (inet_pton(AF_INET, address, &a.sin_addr) != 1) {
         struct addrinfo hints, *res = NULL;
+#ifdef __SWITCH__
+        extern int Port_NxNetUp(void); /* plat_nxpad.c: the console's sockets (a name is looked up before any socket) */
+        Port_NxNetUp();
+#endif
         memset(&hints, 0, sizeof(hints));
         hints.ai_family = AF_INET;
         hints.ai_socktype = SOCK_DGRAM;

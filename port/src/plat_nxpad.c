@@ -29,15 +29,45 @@ int Port_NxControllers(int players) {
     return R_SUCCEEDED(rc) && info.player_count >= players;
 }
 
-/* The console's sockets, for the automatic update's HTTPS (gs/net_update.c: curl, its TLS the console's own): once,
-   when first needed (from the update's thread; the next calls only say how it went). 1 when they are up. */
+/* The console's keyboard (the software keyboard applet), for a text field of the online window (gs/ui.cpp): `text`
+   is shown in it and replaced by what was typed. digits: the number pad. 1 when the player confirmed. */
+int Port_NxKeyboard(const char *header, char *text, size_t size, int digits) {
+    SwkbdConfig kbd;
+    char out[256];
+    Result rc = swkbdCreate(&kbd, 0);
+
+    if (R_FAILED(rc) || size < 2) {
+        return 0;
+    }
+    swkbdConfigMakePresetDefault(&kbd);
+    if (digits) {
+        swkbdConfigSetType(&kbd, SwkbdType_NumPad);
+    }
+    swkbdConfigSetHeaderText(&kbd, header);
+    swkbdConfigSetInitialText(&kbd, text);
+    swkbdConfigSetStringLenMax(&kbd, (u32)(size - 1 < sizeof(out) - 1 ? size - 1 : sizeof(out) - 1));
+    rc = swkbdShow(&kbd, out, sizeof(out));
+    swkbdClose(&kbd);
+    if (R_FAILED(rc)) {
+        return 0;
+    }
+    snprintf(text, size, "%s", out);
+    return 1;
+}
+
+/* The console's sockets, for online play and the automatic update's HTTPS (gs/net_update.c, gs/net_match.c: curl,
+   its TLS the console's own): once, when first needed, from whichever thread asks first (the next calls only say
+   how it went). 1 when they are up. */
 int Port_NxNetUp(void) {
+    static Mutex lock;
     static int state = -1;
+    mutexLock(&lock);
     if (state < 0) {
         Result rc = socketInitializeDefault();
         state = R_SUCCEEDED(rc);
         fprintf(stderr, "bt3: network: %s (%#x)\n", state ? "up" : "the console's sockets could not start", (unsigned)rc);
     }
+    mutexUnlock(&lock);
     return state;
 }
 #endif

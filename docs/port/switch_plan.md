@@ -224,7 +224,8 @@ AI tools (its CLAUDE.md), and they were. Kept in this repository and applied at 
 - **Sound**: the port mixes itself (miniaudio's mixer) and needs one output stream.
 - **Files**: every path is relative to the game's folder, as on PC.
 - **Online**: libnx's BSD sockets (UDP for matches, the TURN relay as on PC), HTTPS to the matchmaking service and
-  GitHub through devkitPro's curl. The same `NET_VERSION` as the PC release: Switch and PC play each other.
+  GitHub through devkitPro's curl. The same `NET_VERSION` as the PC release: Switch and PC play each other ("Online
+  (phase 6)": without rollback on the Switch's side).
 - **Not on the Switch**: the screen reader (Prism has no Switch library), the PC helper programs (the MP3 import
   of songs converts on the PC; `.adx` songs work), opening web pages (the release page is shown as its address).
 
@@ -252,7 +253,7 @@ an `.nro` from the homebrew menu through a game (hold R): the same folder, no HO
 | 3. The demo fight on a console | The launcher loads the game; the attract-demo fight runs without a picture and its `BT3_HASH` lines (written to the card) equal Linux's (`compare_hash.py`). **Done** (2026-10-29): "battle finished", the fight's values the same as the PC's on all 4242 blanks of fighting. |
 | 4. Playable | The platform layer: picture (GL), sound, controllers; the game plays from boot to a fight and saves. **Done** (2026-10-30), with the CPU overclocked to 1785 MHz (sys-clk), which is a requirement: there everything checked works (menus, fights at a clean 30, HUD and effects, movies, saving, added songs and stages); at the stock 1020 MHz fights reach 16 to 20 pictures a second, unevenly paced (see "Results"). |
 | 5. The package | This fork's own releases (not the original repository's, and no Switch mode in its setup), signed with this fork's key; the updater on the Switch (this fork's releases, HTTPS through the console's own TLS, the end into the launcher); a workflow that follows the original repository's releases and decides by itself whether to publish, pre-release or skip each. The `.nro` is the program to start (from the homebrew menu, or the HOME menu through a forwarder such as sphaira's); no NSP of its own ("The NSP"). **Done** (2026-10-30, "Releases (phase 5)"): the first release, v0.1.39.2-nx1, made by switch-release.yml; a game built as 0.1.39.2 with its key, on a console, found it, downloaded and checked it over HTTPS (the console's TLS), installed its 51 files, ended into the launcher, and started again as 0.1.39.2-nx1. |
-| 6. Online | A lobby between a Switch and a PC, by code and by address. |
+| 6. Online | A lobby between a Switch and a PC, by code and by address ("Online (phase 6)"). **Done** (2026-10-30): sessions on the Switch (no rollback there), its sockets and HTTPS; a player's match between a Switch and a PC in a lobby with a room code (the build of PR #6) played without a fault, so the matchmaking service lets the fork's unsigned requests in for codes (2026-10-30); by address not yet tried. |
 
 Biggest risk: **speed**. The game's arithmetic is exact software float (the README asks for a recent mid-range PC
 processor); the Switch has four Cortex-A57 cores at 1020 MHz (1785 MHz is common with overclocking). The spike times
@@ -330,6 +331,49 @@ port.
   GitHub refuses the workflow's own token commits that change workflow files, which the original's history has now
   and then: the secret `FOLLOW_TOKEN` (a fine-grained token for this repository, Contents and Workflows read and
   write) is used for the push when it is set.
+
+## Online (phase 6)
+
+The PC's online play as it is (`port/src/gs/net*.c`, the Tenkaichi Budokai Online screens of `src/menu/port_tbo.c`),
+with the same `NET_VERSION`: a Switch and a PC are two copies of one game. Before phase 6 the Switch build had the
+code but could not use it; what it lacked:
+
+- **Sessions** (`port/src/gs/state.c`): a lobby's match begins by keeping the game's present state and putting it
+  back to its first blank (the same on every machine), and ends by putting the kept state back. That part was built
+  for the x86-64 programs and macOS only, so on the Switch every lobby said "Lobbies need the game's state list".
+  It is now built there as on macOS: the registers by `setjmp`, the copy back on another stack (`Port_CallOnStack`,
+  `plat_mem.c`), the list `Tenkaichi3Decomp.mem` that each release has. Two whole states are kept (the first
+  blank's, taken at every start, and the player's own during a session): the game's heap (28 MB), the port's block
+  region as far as used, and its variables.
+- **No rollback on the Switch**: the roll ring (a save per blank) learns which pages a blank wrote from the system
+  (Linux and macOS: write faults on read-only pages; Windows: GetWriteWatch). Horizon gives a program neither, and a
+  whole copy per blank does not fit in one. So `Port_RollCan` is 0 there, which net.c already handles: the Switch's
+  rollback limit is 0 and it waits for the other player's input of each blank, with the input delay chosen from the
+  connection (Automatic). The other side may still roll back; the two ways play each other.
+- **The network**: the console's sockets are brought up when first needed (`Port_NxNetUp`, plat_nxpad.c, now
+  thread-safe: the update's and the matchmaking's threads can ask at once), where Windows calls `WSAStartup`.
+- **The matchmaking service** (room codes, quick match, the relay's logins): HTTPS through devkitPro's curl, linked,
+  as the update does, the answer into memory (`net_match.c`); on Linux the system's curl library is still loaded.
+- **Typing**: the online screens' keypads work with the controller as on PC. The Dragon Net Battle window (F1 >
+  Online > Advanced) opens the console's keyboard for its fields (`Port_NxKeyboard`, swkbd); no Paste there, the
+  Switch has no clipboard. The chat during a match is not offered (it opens from the keyboard).
+- The "update needed" lines name this fork's releases page (`PORT_UPDATE_REPO`), and + and - instead of F1.
+
+**The build key.** The original's releases sign their requests to its matchmaking service with a key of each
+release (`net_sign.c`, `port/matchmaking/README.md`); this fork has no such key, so the Switch's requests are not
+signed. What that costs depends on the service's setting `REQUIRE_KEY`, which only its keeper sees: `off`,
+everything works; `quick`, quick match is refused ("Quick match needs an official release of the game.") while
+lobbies with codes and the relay work; `all`, codes are refused too ("Room codes need an official release...").
+Playing by address never asks the service. A key for the fork can only come from the original's keeper (its
+`BUILD_KEYS` holds one key per release number; a Switch build of that number would need the same key, as a
+`BT3_BUILD_KEY` secret here); taking the key out of the original's program is not done.
+
+**How to test** (phase 6 is done when both work):
+1. By address, on one home network: on the PC, Tenkaichi Budokai Online > Lobby > Host by Address (its port, 7000 by
+   default, open in the PC's firewall); on the Switch, Join > By Address with the PC's address on the network
+   (`ipconfig`) and that port. A match, then back to the lobby, then leave.
+2. By code: one opens a lobby with a code, the other joins with it (both ways round).
+The Switch's log (`bt3_log.txt`) says "network: up", the session's start and end, and the meter's numbers.
 
 ## The game on a console (phase 4): how to run it
 

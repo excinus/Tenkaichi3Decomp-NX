@@ -26,6 +26,8 @@ the Tenkaichi3Decomp project: please report Switch problems here, not upstream.
 - **Switch buttons everywhere**: A/B/X/Y and L/R/ZL/ZR icons, Joy-Cons on the Controller page, A to choose and
   B to go back in the menus.
 - **Local 1P vs 2P**: a Joy-Con each, held sideways, or two controllers, picked on the console's own screen.
+- **Online play with PC players**: lobbies by code or by address, through the game's Tenkaichi Budokai Online
+  menu (the Switch waits for the other player's input instead of rolling back).
 - **Automatic updates**: the game tells you about a new release and installs it itself.
 - **Mods, texture packs, extra songs and stages**, and saves you can move between PC and Switch.
 - **Settings window**: press **+ and −** together (the PC version's F1).
@@ -33,7 +35,7 @@ the Tenkaichi3Decomp project: please report Switch problems here, not upstream.
 In fights the buttons match the PS2 pad by position (B = ✕, A = ○, Y = □, X = △, ZL/ZR = L2/R2). A sideways
 Joy-Con uses SL as ZL, SR as R, and its top buttons as L and ZR; its stick also moves through the menus.
 
-**Known issues**: two-player split screen runs at about 20 fps; online play is not available yet.
+**Known issues**: two-player split screen runs at about 20 fps.
 
 Tested on a Switch OLED; the V1, V2 and Lite run the same program. sys-clk keeps the GPU lower where it judges the
 battery at risk: on a **V1 unplugged** it allows 460 MHz (614 on the others), which may cost some speed in fights
