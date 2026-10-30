@@ -8,6 +8,11 @@
  *   - CPU 1785 MHz and memory 1600 MHz always;
  *   - GPU 921 MHz docked or on a charger (any: the official one, another USB one), 614 MHz in the hand on the battery;
  *     followed as the console goes in and out of its dock or is plugged in (the watch thread, twice a second).
+ * sys-clk holds the GPU below what is asked where it judges it unsafe for the battery (its ClockManager::
+ * GetMaxAllowedHz, which an override passes through too): on the battery 460.8 MHz on a V1 (Erista) and 614.4 on the
+ * others (Mariko), 768 on a charger that is not the official one; no limit docked or on the official charger. The
+ * Lite (Mariko, 12 W for the whole board against the others' 18) is never asked more than 614.4: what the OLED plays
+ * at a clean 30 in the hand, so nothing is lost. The console's model is in the log.
  * They are taken back (0: sys-clk's own) as soon as the game is not in front (the HOME menu, sleep: an applet hook), so
  * that closing it from the HOME menu leaves nothing behind, and set again when it is back. (Holding back the system's
  * closing instead, appletLockExit, left the console waiting for the game's end and then saying it had crashed: the
@@ -37,6 +42,7 @@ extern int Port_Setting(const char *name, int def);
 static Service sSrv;
 static int sState = -1; /* -1 not tried, 0 sys-clk not there, 1 connected */
 static int sOn, sAway, sGpuWas = -1;
+static SetSysProductModel sModel = SetSysProductModel_Invalid;
 static AppletHookCookie sHook;
 
 static Result set_override(u32 module, u32 hz) {
@@ -52,6 +58,7 @@ static void gpu_for_power(int force) {
     int power;
     psmGetChargerType(&charger);
     power = appletGetOperationMode() == AppletOperationMode_Console || charger != PsmChargerType_Unconnected;
+    power = power && sModel != SetSysProductModel_Hoag; /* (the Lite: 614.4 always, see above) */
     if (power != sGpuWas || force) {
         sGpuWas = power;
         set_override(SYSCLK_GPU, power ? GPU_POWER_HZ : GPU_HAND_HZ);
@@ -97,6 +104,15 @@ static void on_applet(AppletHookType type, void *param) {
 void Port_NxClockSet(int on) {
     if (sState < 0) {
         sState = R_SUCCEEDED(smGetService(&sSrv, "sys:clk")) ? 1 : 0;
+        if (R_SUCCEEDED(setsysInitialize())) {
+            setsysGetProductModel(&sModel);
+            setsysExit();
+        }
+        fprintf(stderr, "bt3: console: %s\n",
+                sModel == SetSysProductModel_Nx ? "Switch V1 (Erista): sys-clk allows the GPU 460 MHz on the battery" :
+                sModel == SetSysProductModel_Iowa ? "Switch V2 (Mariko)" :
+                sModel == SetSysProductModel_Hoag ? "Switch Lite (Mariko): the GPU at 614 MHz at most" :
+                sModel == SetSysProductModel_Aula ? "Switch OLED (Mariko)" : "another model");
         if (sState == 1) {
             psmInitialize();
             atexit(off_at_exit);
@@ -111,7 +127,8 @@ void Port_NxClockSet(int on) {
     if (on) {
         clocks_on();
         fprintf(stderr, "bt3: clocks: CPU 1785 MHz, memory 1600 MHz, GPU %s\n",
-                sGpuWas ? "921 MHz (docked or charging)" : "614 MHz (on the battery)");
+                sGpuWas ? "921 MHz (docked or charging; 768 on a charger that is not the official one)" :
+                sModel == SetSysProductModel_Hoag ? "614 MHz (the Lite)" : "614 MHz (on the battery)");
     } else {
         clocks_off();
         fprintf(stderr, "bt3: clocks: sys-clk's own again\n");
