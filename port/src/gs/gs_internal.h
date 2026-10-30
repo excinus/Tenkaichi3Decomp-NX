@@ -36,6 +36,7 @@ uint32_t Gs_PageHash(uint32_t page); /* content hash of an 8 KB page of GS memor
 uint32_t Gs_VramRead(uint32_t bp, uint32_t bw, uint32_t psm, uint32_t x, uint32_t y);
 /* The 256-byte block of GS memory that holds the pixel (x, y) of that buffer (formats 0x00, 0x13, 0x14). */
 const uint8_t *Gs_BlockPtr(uint32_t bp, uint32_t bw, uint32_t psm, uint32_t x, uint32_t y);
+void Gs_FrameRead32(uint32_t bp, uint32_t bw, uint32_t w, uint32_t h, uint32_t *out);
 extern unsigned gGsFbUploads;
 void GsGpu_FbUpload(int second);
 int Gs_PsmBits(uint32_t psm);

@@ -347,7 +347,13 @@ static void late_wait(void) {
         PortInput_Fresh(); /* the controllers and keys as they are now, not as they were when the last picture was shown */
     }
 }
+/* Where the game's thread is, roughly: set where it enters and leaves the port's main parts (the blank, the
+   controllers, the files, the memory card, the sound's locks, a texture's decoding, the picture), for the Switch's
+   watch thread (plat_mem.c) to report when the game stops drawing. (Not game state: PORT_HOST.) */
+PORT_HOST const char *volatile gPortWhere = "starting";
+
 void Port_VBlank(void) {
+    gPortWhere = "the blank (sceGsSyncV)";
     Port_LagMark('W'); /* (the game has come to wait for a blank) */
     {
         extern void Port_SessionPoll(void); /* gs/state.c: the state at the first blank is kept; an online session
@@ -439,6 +445,7 @@ void Port_VBlank(void) {
     if (sVsyncHandler != NULL) {
         sVsyncHandler(0);
     }
+    gPortWhere = "the game's code, after a blank";
 }
 int sceGsSyncV() { Port_VBlank(); return 0; }
 
@@ -636,6 +643,20 @@ int Port_Menus43(void) {
 }
 void Port_Menus43Set(int on) {
     sMenus43 = on != 0;
+}
+/* The menu layout "Widescreen" (setting menus_wide; BT3_MENU_WIDE=0/1 over it): the screens converted for it
+   (Port_MenuPage, port/src/gs_marker.c) have their 2D at its true shape and their backdrops across the whole width;
+   the others are stretched as before. Not with "Menus in 4:3". */
+PORT_HOST static int sMenusWide = -1;
+int Port_MenusWide(void) {
+    if (sMenusWide < 0) {
+        const char *env = getenv("BT3_MENU_WIDE");
+        sMenusWide = env != NULL && env[0] != '\0' ? atoi(env) != 0 : Port_Setting("menus_wide", 0) != 0;
+    }
+    return sMenusWide && !Port_Menus43();
+}
+void Port_MenusWideSet(int on) {
+    sMenusWide = on != 0;
 }
 int Port_PageAspectMilli(void) {
     return gPortMenuMode && Port_Menus43() ? 1333 : Port_AspectMilli();

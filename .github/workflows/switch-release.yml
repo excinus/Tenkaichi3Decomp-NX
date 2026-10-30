@@ -1,0 +1,95 @@
+# A release of the Switch's build by hand (docs/port/switch_plan.md, phase 5): GitHub > Actions > switch-release >
+# Run workflow. It builds the branch chosen there (the default) with switch-build.yml and publishes this fork's release:
+#   the tag v<the original's version>-nx<n>: the n-th Switch release of the original repository's version that it
+#   has (v0.1.39.2-nx1, then -nx2 for a fix...), unless one is typed in;
+#   its files: Tenkaichi3Decomp-switch-SD.zip (a first install), Tenkaichi3Decomp-switch.zip and its .sig (the game's
+#   automatic update), and notes (port/switch/release/notes.sh).
+# A pre-release (the box) is not offered to the games (GitHub's "latest release" is never one) until it is edited
+# into a release on GitHub. The releases that follow the original repository are follow-upstream.yml's.
+name: switch-release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version (empty: the next one, e.g. 0.1.39.2-nx2)"
+        type: string
+        default: ""
+      prerelease:
+        description: "Pre-release (not offered to the games until it is made a release)"
+        type: boolean
+        default: false
+      notes:
+        description: "Notes for the players (optional: what changed)"
+        type: string
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: switch-release
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.v.outputs.tag }}
+      sha: ${{ steps.v.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WANT: ${{ inputs.version }}
+        run: |
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          if [ -n "$WANT" ]; then
+            tag="v${WANT#v}"
+          else
+            tag=$(sh port/switch/release/next_version.sh HEAD)
+          fi
+          echo "$tag" | grep -Eq '^v[0-9]+(\.[0-9]+){1,3}-nx[1-9][0-9]*$' || { echo "::error::$tag is not a Switch release's number (v0.1.39.2-nx1)"; exit 1; }
+          if gh release view "$tag" > /dev/null 2>&1 || git ls-remote --exit-code --tags origin "refs/tags/$tag" > /dev/null; then
+            echo "::error::$tag exists already"; exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "the release: $tag of $(git rev-parse --short HEAD)"
+
+  build:
+    needs: version
+    uses: ./.github/workflows/switch-build.yml
+    with:
+      version: ${{ needs.version.outputs.tag }}
+      ref: ${{ needs.version.outputs.sha }}
+    secrets: inherit
+
+  publish:
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: switch-release
+          path: out
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag }}
+          SHA: ${{ needs.version.outputs.sha }}
+          NOTES: ${{ inputs.notes }}
+          PRE: ${{ inputs.prerelease }}
+          SIGNED: ${{ needs.build.outputs.signed }}
+        run: |
+          sh port/switch/release/notes.sh "$TAG" "$SHA" "$NOTES" "" > notes.md
+          cat notes.md
+          sig=""; [ -f out/Tenkaichi3Decomp-switch.zip.sig ] && sig=out/Tenkaichi3Decomp-switch.zip.sig
+          gh release create "$TAG" --target "$SHA" --title "$TAG (Nintendo Switch)" --notes-file notes.md \
+            $( [ "$PRE" = true ] && echo --prerelease ) \
+            out/Tenkaichi3Decomp-switch-SD.zip out/Tenkaichi3Decomp-switch.zip $sig
+          [ "$SIGNED" = true ] || echo "::warning::$TAG is not signed: games will only say that it exists"

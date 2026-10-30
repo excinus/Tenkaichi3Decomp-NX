@@ -55,7 +55,10 @@ static FILE *host_file(int fd) {
     return sHost[fd];
 }
 
+extern const char *volatile gPortWhere; /* plat_stub.c */
+
 static int request(int cmd, int result) {
+    gPortWhere = "the game's code, after a memory card call";
     sLastCmd = cmd;
     sLastResult = result;
     return 0;
@@ -66,6 +69,7 @@ static int host_path(int port, const char *name, char *out, size_t size) {
     const char *root = getenv("BT3_SAVES") != NULL ? getenv("BT3_SAVES") : "saves";
     char dir[512];
 
+    gPortWhere = "a memory card call";
     if (port != 0) {
         return 0;
     }

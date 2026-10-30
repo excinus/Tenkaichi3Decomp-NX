@@ -25,10 +25,10 @@
 #else
 #define GAME_PTR *
 #endif
-/* The game's layouts. On Apple arm64 only where its pointers are 4 bytes (not in ptr32.py's libclang 18 parse there,
-   which ignores __ptr32; the compile after it checks them); everywhere else always, so that a build whose game
-   pointers are not 4 bytes stops here instead of reading the game's structures wrongly */
-#if defined(__APPLE__) && defined(__aarch64__)
+/* The game's layouts. On Apple arm64 and the Switch only where its pointers are 4 bytes (not in ptr32.py's libclang
+   18 parse there, which ignores __ptr32 on arm64; the compile after it checks them); everywhere else always, so that
+   a build whose game pointers are not 4 bytes stops here instead of reading the game's structures wrongly */
+#if (defined(__APPLE__) || defined(__SWITCH__)) && defined(__aarch64__)
 #define LAYOUT_ASSERT(c, m) _Static_assert(sizeof(void GAME_PTR) != 4 || (c), m)
 #else
 #define LAYOUT_ASSERT(c, m) _Static_assert(c, m)
@@ -2951,6 +2951,12 @@ static A11yBtlMenu GAME_PTR btl_menu_shown(void) {
         m = (A11yBtlMenu GAME_PTR)m->items[m->open].sub;
     }
     return m->count > 0 && m->count < 64 ? m : NULL;
+}
+
+/* For the Switch's Nintendo layout (gs/gs_input.c, menu_ab): 1 while a menu of the battle takes input, the pause menu
+   or the one after the fight, as btl_menu_shown finds it. */
+int Port_BattleMenuOpen(void) {
+    return btl_menu_shown() != NULL;
 }
 
 /* 1: the menu is the skill list or the controls page, which are not a list of items (left to shown_text). */

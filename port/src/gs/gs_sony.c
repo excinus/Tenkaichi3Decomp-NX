@@ -12,6 +12,12 @@
 
 extern void Port_GsGifChannel(uint32_t addr, uint32_t qwc, int chain);
 int gGsMainFbp = -1; /* frame-buffer address of the frame being drawn (from sceGsSwapDBuff); -1 before the first swap */
+/* The game's own last sceGsSwapDBuff. With the render thread, gGsMainFbp is the render thread's: it takes this value
+   with each job, as it was when the job was handed over (gs_core.c, render_post). The game sets the next frame's
+   buffer while the thread still draws the frame before: read from here, that frame showed the other buffer, which
+   held an older picture (the stock clock's fights on the Switch went back and forth). */
+int gGsMainFbpGame = -1;
+extern int Gs_RenderThreaded(void);
 
 typedef struct { uint64_t v, addr; } Reg;                      /* one A+D register write */
 typedef struct { Reg frame, zbuf, xyoffset, scissor, prmodecont, colclamp, dthe, test; } DrawEnv;
@@ -70,6 +76,9 @@ int sceGsPutDrawEnv(uint64_t *giftag) {
 int sceGsSwapDBuff(void *p, int id) {
     DBuff *db = p;
     /* the buffer this frame is drawn into: what the renderer shows when the frame is finished */
-    gGsMainFbp = (int)(((id & 1) ? db->draw1.frame.v : db->draw0.frame.v) & 0x1FF);
+    gGsMainFbpGame = (int)(((id & 1) ? db->draw1.frame.v : db->draw0.frame.v) & 0x1FF);
+    if (!Gs_RenderThreaded()) {
+        gGsMainFbp = gGsMainFbpGame;
+    }
     return sceGsPutDrawEnv((id & 1) ? db->giftag1 : db->giftag0);
 }

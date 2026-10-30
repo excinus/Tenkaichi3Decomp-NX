@@ -26,6 +26,33 @@ static int sCount;
 static pthread_once_t sOnce = PTHREAD_ONCE_INIT;
 static pthread_mutex_t sLock = PTHREAD_MUTEX_INITIALIZER;
 
+#ifdef __SWITCH__
+/* The Switch: what the PC versions keep that does not apply there (one screen, OpenGL only, no mouse, no tearing to
+   wait for, no Smooth motion: the settings window does not show these there). Not kept, and left out of the file
+   when it is next written. And the start without the logos, the intro movie and the copyright page unless chosen otherwise: the
+   movies flicker on the console for now (2026-10-29); and vibration at 30% (Controls), at 100% too strong in the
+   Joy-Cons (a player's report, 2026-10-30). */
+static int unused_here(const char *name) {
+    static const char *const kUnused[] = {"fullscreen", "display", "gpu_api", "render_thread", "hide_pointer", "vsync", "interp"};
+    size_t i;
+    for (i = 0; i < sizeof(kUnused) / sizeof(kUnused[0]); i++) {
+        if (strcmp(name, kUnused[i]) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+static int default_here(const char *name, int def) {
+    if (strncmp(name, "vibration_p", 11) == 0 && strstr(name, "_strength") != NULL) {
+        return 30;
+    }
+    return strcmp(name, "skip_logos") == 0 || strcmp(name, "skip_intro") == 0 || strcmp(name, "skip_copyright") == 0 ? 1 : def;
+}
+#else
+#define unused_here(name) 0
+#define default_here(name, def) (def)
+#endif
+
 static const char *path(void) {
     const char *p = getenv("BT3_SETTINGS");
     return p == NULL ? "bt3_settings.txt" : p[0] == '\0' ? NULL : p;
@@ -44,6 +71,10 @@ static void load(void) {
                 strcpy(sText[sTextCount++].value, text);
             }
         } else if (sscanf(line, " %23[a-z0-9_]=%d", name, &value) == 2) {
+            if (unused_here(name)) {
+                sDirty = 1; /* (the file is written without it next time) */
+                continue;
+            }
             strcpy(sSet[sCount].name, name);
             sSet[sCount++].value = value;
         }
@@ -55,7 +86,7 @@ static void load(void) {
 
 /* The saved value of a setting, or `def` when the file does not have it. */
 int Port_Setting(const char *name, int def) {
-    int i, v = def;
+    int i, v = default_here(name, def);
 
     pthread_once(&sOnce, load);
     pthread_mutex_lock(&sLock);
@@ -72,6 +103,9 @@ int Port_Setting(const char *name, int def) {
 void Port_SettingSave(const char *name, int value) {
     int i;
 
+    if (unused_here(name)) {
+        return;
+    }
     pthread_once(&sOnce, load);
     pthread_mutex_lock(&sLock);
     for (i = 0; i < sCount && strcmp(sSet[i].name, name) != 0; i++) {

@@ -150,6 +150,52 @@ __attribute__((constructor(101))) static void crash_init(void) {
     setvbuf(stderr, NULL, _IONBF, 0);
     AddVectoredExceptionHandler(1, on_crash);
 }
+#elif defined(__SWITCH__)
+/* Nintendo Switch: libnx calls __libnx_exception_handler when this program faults (homebrew under Atmosphere). The
+   report is the registers and the address reached, also as a game address (port_addr.h); no backtrace, but the
+   program is linked at a fixed address (the window + 0x20000000), so pc, lr and the x registers can be looked up in
+   bt3_nx.map of the same build. Written to bt3_crash.txt in the game's folder and to stderr. */
+#include <switch.h>
+#include <stdio.h>
+#include <string.h>
+#include "port_addr.h"
+extern const char *Port_DataSummary(void); /* plat_verify.c */
+extern const char *volatile gPortStage;    /* plat_mem.c: how far the start got */
+
+/* libnx runs the handler on a stack of its own */
+alignas(16) u8 __nx_exception_stack[0x4000];
+u64 __nx_exception_stack_size = sizeof(__nx_exception_stack);
+
+static void report(FILE *f, const ThreadExceptionDump *ctx) {
+    int r;
+    fprintf(f, "bt3: crashed: exception %#x (%s), esr %#x\n", ctx->error_desc,
+            ctx->error_desc == ThreadExceptionDesc_InstructionAbort ? "bad instruction address" :
+            ctx->error_desc == ThreadExceptionDesc_BadSVC ? "system call not allowed" :
+            ctx->error_desc == ThreadExceptionDesc_Other ? "bad memory access, or other" : "other", ctx->esr);
+    if (Port_DataSummary()[0] != '\0') { /* (plat_verify.c: not the original disc's data) */
+        fprintf(f, "%s\n", Port_DataSummary());
+    }
+    fprintf(f, "stage: %s\n", gPortStage);
+    fprintf(f, "address %#llx (game address %#x)\n", (unsigned long long)ctx->far.x,
+            (unsigned)((uintptr_t)ctx->far.x - PORT_WINDOW));
+    fprintf(f, "pc %#llx lr %#llx sp %#llx", (unsigned long long)ctx->pc.x, (unsigned long long)ctx->lr.x,
+            (unsigned long long)ctx->sp.x);
+    for (r = 0; r < 29; r++) {
+        fprintf(f, "%sx%02d %#llx", r % 4 == 0 ? "\n" : " ", r, (unsigned long long)ctx->cpu_gprs[r].x);
+    }
+    fprintf(f, "\n");
+}
+
+void __libnx_exception_handler(ThreadExceptionDump *ctx) {
+    FILE *f = fopen("bt3_crash.txt", "w");
+    report(stderr, ctx);
+    fflush(stderr); /* (the log is written in blocks on the Switch: plat_mem.c) */
+    if (f != NULL) {
+        report(f, ctx);
+        fclose(f);
+    }
+    svcExitProcess();
+}
 #else
 #include <execinfo.h>
 #include <fcntl.h>

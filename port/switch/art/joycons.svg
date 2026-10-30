@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="422.6" height="557.7" viewBox="0 0 422.6 557.7">
+<g id="joycon-left" transform="translate(-5.5 -13.8)">
+  <g transform="translate(20.5 34.5)">
+    <path d="M5.09 65 A115.55 107.8 0 0 1 112.5 -3.05 H139.2" fill="none" stroke="#000" stroke-width="7.35" stroke-linecap="round"/>
+    <path d="M5.09 65 A115.55 107.8 0 0 1 112.5 -3.05 H139.2" fill="none" stroke="#44484C" stroke-width="4.85" stroke-linecap="round"/>
+    <path d="M171 29.3 H186.5 Q188.5 29.3 188.5 31.3 V106.5 Q188.5 109.7 186.9 111.5 L182 117.5 V162.5 L186.9 168.5 Q188.5 170.3 188.5 173.5 V318.5 Q188.5 321.7 186.9 323.5 L182 329.5 V373.5 L186.9 379.5 Q188.5 381.3 188.5 384.5 V469.3 Q188.5 470.8 187 470.8 H180.8 Q177.8 470.8 177.8 467.8 V448.5 H171 Z" fill="#44484C" stroke="#000" stroke-width="1.25" stroke-linejoin="round"/>
+    <path d="M182 118.5 H186.5 Q188.5 118.5 188.5 120.5 V159.5 Q188.5 161.5 186.5 161.5 H182 Z" fill="#00BBDB" stroke="#000" stroke-width="1.25"/>
+    <path d="M182 330.5 H186.5 Q188.5 330.5 188.5 332.5 V370.5 Q188.5 372.5 186.5 372.5 H182 Z" fill="#00BBDB" stroke="#000" stroke-width="1.25"/>
+    <path d="M112.5 0 H169 Q171 0 171 2 V521.3 Q171 522.3 170 522.3 H106.25 A106.25 108.5 0 0 1 0 413.8 V104.75 A112.5 104.75 0 0 1 112.5 0 Z" fill="#00BBDB" stroke="#000" stroke-width="1.25"/>
+  </g>
+  <rect x="149.6" y="82.6" width="27.8" height="7.8" fill="#44484C" stroke="#000" stroke-width="1.25"/>
+  <circle cx="111.2" cy="170.36" r="40" fill="#44484C" stroke="#000" stroke-width="1.25"/>
+    <circle cx="111.2" cy="170.36" r="27.7" fill="#44484C" stroke="#000" stroke-width="1.25"/>
+    <line x1="111.2" y1="142.66" x2="111.2" y2="130.36" stroke="#000" stroke-width="2.2"/>
+    <line x1="111.2" y1="198.06" x2="111.2" y2="210.36" stroke="#000" stroke-width="2.2"/>
+    <line x1="83.5" y1="170.36" x2="71.2" y2="170.36" stroke="#000" stroke-width="2.2"/>
+    <line x1="138.9" y1="170.36" x2="151.2" y2="170.36" stroke="#000" stroke-width="2.2"/>
+  <circle cx="110.99" cy="278.54" r="18.85" fill="#44484C" stroke="#000" stroke-width="1.25"/>
+  <polygon points="110.99,269.24 119.99,284.54 101.99,284.54" fill="#000" stroke="#000" stroke-width="0.6" stroke-linejoin="round"/>
+  <circle cx="71.81" cy="317.69" r="18.85" fill="#44484C" stroke="#000" stroke-width="1.25"/>
+  <polygon points="62.51,317.69 77.81,308.69 77.81,326.69" fill="#000" stroke="#000" stroke-width="0.6" stroke-linejoin="round"/>
+  <circle cx="150.19" cy="317.64" r="18.85" fill="#44484C" stroke="#000" stroke-width="1.25"/>
+  <polygon points="159.49,317.64 144.19,326.64 144.19,308.64" fill="#000" stroke="#000" stroke-width="0.6" stroke-linejoin="round"/>
+  <circle cx="111.03" cy="356.83" r="18.85" fill="#44484C" stroke="#000" stroke-width="1.25"/>
+  <polygon points="111.03,366.13 102.03,350.83 120.03,350.83" fill="#000" stroke="#000" stroke-width="0.6" stroke-linejoin="round"/>
+  <rect x="123.4" y="401.2" width="32" height="30.8" rx="4" fill="#44484C" stroke="#000" stroke-width="1.25"/>
+  <circle cx="139.6" cy="417" r="11.6" fill="#000"/>
+</g>
+<g id="joycon-right" transform="translate(195 -9.8)">
+  <g transform="translate(212.5 30.5) scale(-1 1)">
+    <path d="M5.09 65 A115.55 107.8 0 0 1 112.5 -3.05 H139.2" fill="none" stroke="#000" stroke-width="7.35" stroke-linecap="round"/>
+    <path d="M5.09 65 A115.55 107.8 0 0 1 112.5 -3.05 H139.2" fill="none" stroke="#44484C" stroke-width="4.85" stroke-linecap="round"/>
+    <path d="M171 29.3 H186.5 Q188.5 29.3 188.5 31.3 V106.5 Q188.5 109.7 186.9 111.5 L182 117.5 V162.5 L186.9 168.5 Q188.5 170.3 188.5 173.5 V318.5 Q188.5 321.7 186.9 323.5 L182 329.5 V373.5 L186.9 379.5 Q188.5 381.3 188.5 384.5 V469.3 Q188.5 470.8 187 470.8 H180.8 Q177.8 470.8 177.8 467.8 V448.5 H171 Z" fill="#44484C" stroke="#000" stroke-width="1.25" stroke-linejoin="round"/>
+    <path d="M182 118.5 H186.5 Q188.5 118.5 188.5 120.5 V159.5 Q188.5 161.5 186.5 161.5 H182 Z" fill="#FF5F53" stroke="#000" stroke-width="1.25"/>
+    <path d="M182 330.5 H186.5 Q188.5 330.5 188.5 332.5 V370.5 Q188.5 372.5 186.5 372.5 H182 Z" fill="#FF5F53" stroke="#000" stroke-width="1.25"/>
+    <path d="M112.5 0 H169 Q171 0 171 2 V521.3 Q171 522.3 170 522.3 H106.25 A106.25 108.5 0 0 1 0 413.8 V104.75 A112.5 104.75 0 0 1 112.5 0 Z" fill="#FF5F53" stroke="#000" stroke-width="1.25"/>
+  </g>
+  <path d="M64.6 67.9 H72.9 V77.4 H82.4 V85.6 H72.9 V95.4 H64.6 V85.6 H55.1 V77.4 H64.6 Z" fill="#44484C" stroke="#000" stroke-width="1.25"/>
+  <circle cx="121.03" cy="122.9" r="18.85" fill="#44484C" stroke="#000" stroke-width="1.25"/>
+  <path d="M123.28 122.79 129.83 133.2H124.85L120.93 126.12L117.04 133.2H112.17L118.61 122.93L112.4 112.8H117.38L120.96 119.52L124.71 112.8H129.58Z" fill="#fff"/>
+  <circle cx="81.89" cy="162.02" r="18.85" fill="#44484C" stroke="#000" stroke-width="1.25"/>
+  <path d="M84.25 164.64V172.2H80.06V164.64L73.28 151.8H77.96L82.13 160.81L86.02 151.8H90.72Z" fill="#fff"/>
+  <circle cx="160.15" cy="162.04" r="18.85" fill="#44484C" stroke="#000" stroke-width="1.25"/>
+  <path d="M163.82 168.09H156.18L154.81 172.2H150.53L157.78 151.8H162.42L169.47 172.2H165.16ZM162.67 164.59 160.01 156.61 157.36 164.59Z" fill="#fff"/>
+  <circle cx="121" cy="201.2" r="18.85" fill="#44484C" stroke="#000" stroke-width="1.25"/>
+  <path d="M129.67 205.82Q129.67 206.83 129.34 207.78Q129 208.73 128.26 209.66Q127.52 210.58 126.03 211.14Q124.55 211.7 122.51 211.7H113.33V191.3H122.42Q124.33 191.3 125.71 191.86Q127.1 192.42 127.78 193.3Q128.47 194.18 128.78 195.02Q129.08 195.86 129.08 196.67Q129.08 197.99 128.44 198.95Q127.8 199.92 126.29 200.87Q129.67 202.86 129.67 205.82ZM117.53 194.8V199.42H122.09Q125.05 199.42 125.05 197.12Q125.05 194.8 122.09 194.8ZM117.53 202.91V208.2H122.54Q125.64 208.2 125.64 205.57Q125.64 202.91 122.54 202.91Z" fill="#fff"/>
+  <circle cx="121.27" cy="307.35" r="40" fill="#44484C" stroke="#000" stroke-width="1.25"/>
+    <circle cx="121.27" cy="307.35" r="27.7" fill="#44484C" stroke="#000" stroke-width="1.25"/>
+    <line x1="121.27" y1="279.65" x2="121.27" y2="267.35" stroke="#000" stroke-width="2.2"/>
+    <line x1="121.27" y1="335.05" x2="121.27" y2="347.35" stroke="#000" stroke-width="2.2"/>
+    <line x1="93.57" y1="307.35" x2="81.27" y2="307.35" stroke="#000" stroke-width="2.2"/>
+    <line x1="148.97" y1="307.35" x2="161.27" y2="307.35" stroke="#000" stroke-width="2.2"/>
+  <circle cx="92.3" cy="405" r="21" fill="#999595" stroke="#000" stroke-width="1.25"/>
+  <circle cx="92.3" cy="405" r="15.6" fill="#3A3D40" stroke="#000" stroke-width="1.25"/>
+  <path d="M92.1 393.3 L103.6 404.6 H100.7 V414.4 H84 V404.6 H80.6 Z M89.3 405 V410.3 H95.7 V405 Z" fill="#000" fill-rule="evenodd"/>
+</g>
+</svg>

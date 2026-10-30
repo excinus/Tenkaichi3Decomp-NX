@@ -468,6 +468,12 @@ void FontTag_Ub0(FontTagDef *def, u64 **pkt, FontCmd *cmd, FontCmd *saved, s32 *
 void FontIcon_Init(void) {
     u32 *boot = gCommonRes->boot;
 
+#if defined(PORT) && defined(__SWITCH__)
+    { /* the button icons of the game's text, for the Switch's (port/src/plat_nxart.c) */
+        extern void Port_NxIconArt(void *boot);
+        Port_NxIconArt(boot);
+    }
+#endif
     gFontIconRes = (FontIconRes *)(boot + (boot[8] >> 2));
     Res_RelocateOffsets(&gFontIconRes, gFontIconRes, gFontIconRes);
     Font_SetBeginCallback(FontIcon_Begin);

@@ -12,9 +12,22 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
+#include "port_host.h"
 extern void Port_StateTouch(void *p, unsigned long n); /* gs/state.c */
 
+/* The time the game's file reads and opens took, their number and bytes (BT3_GS_VERBOSE's slow-frame line,
+   gs/gs_core.c, which clears them each frame). Not game state. */
+PORT_HOST unsigned long long gPortFileNs = 0, gPortFileOpenNs = 0, gPortFileBytes = 0;
+PORT_HOST unsigned gPortFileReads = 0, gPortFileOpens = 0;
+static unsigned long long fc_now(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (unsigned long long)ts.tv_sec * 1000000000ull + (unsigned long long)ts.tv_nsec;
+}
+
 extern const char *Port_FileRoot(void); /* plat_file.c: BT3_DATA or "gamedata" */
+extern const char *volatile gPortWhere; /* plat_stub.c */
 
 enum { SLOTS = 32 };
 static struct { char rel[128]; FILE *fp; long size; unsigned long used; } sSlot[SLOTS];
@@ -63,7 +76,12 @@ static int slot_of(const char *rel) {
             return i;
         }
     }
-    fp = Port_FileOpenHost(rel, path, sizeof(path));
+    {
+        unsigned long long t0 = fc_now();
+        fp = Port_FileOpenHost(rel, path, sizeof(path));
+        gPortFileOpenNs += fc_now() - t0;
+        gPortFileOpens++;
+    }
     if (fp == NULL) {
         fprintf(stderr, "bt3: file not found: %s\n", path);
         return -1;
@@ -101,11 +119,13 @@ static int slot_of(const char *rel) {
 long Port_FileSize(const char *rel) {
     long size;
     int i;
+    gPortWhere = "opening a game file";
     while (__sync_lock_test_and_set(&sLock, 1)) {
     }
     i = slot_of(rel);
     size = i < 0 ? -1 : sSlot[i].size;
     __sync_lock_release(&sLock);
+    gPortWhere = "the game's code, after opening a game file";
     return size;
 }
 
@@ -113,13 +133,19 @@ long Port_FileSize(const char *rel) {
 size_t Port_FileReadAt(const char *rel, long offset, void *buf, size_t bytes) {
     size_t got = 0;
     int i;
+    gPortWhere = "reading a game file";
     while (__sync_lock_test_and_set(&sLock, 1)) {
     }
     i = slot_of(rel);
     if (i >= 0 && fseek(sSlot[i].fp, offset, SEEK_SET) == 0) {
+        unsigned long long t0 = fc_now();
         Port_StateTouch(buf, bytes); /* (gs/state.c: file data straight into watched memory) */
         got = fread(buf, 1, bytes, sSlot[i].fp);
+        gPortFileNs += fc_now() - t0;
+        gPortFileBytes += got;
+        gPortFileReads++;
     }
     __sync_lock_release(&sLock);
+    gPortWhere = "the game's code, after reading a game file";
     return got;
 }

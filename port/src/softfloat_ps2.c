@@ -143,3 +143,21 @@ uint32_t __floatunsisf(uint32_t v) {
 
     return (v & SIGN) ? RefVu0_AddBits(f, 0x4F800000u) : f;
 }
+
+#ifdef __SWITCH__
+/* The Switch (AArch64 code without its float unit, port/tools/undefined.py): LLVM converts an UNSIGNED 32-bit integer
+   by widening it to 64 bits and calling this, where x86 calls __floatunsisf; the Switch's C library has no such
+   routine. A value below 2^32 (the game has nothing wider to convert) is converted exactly as __floatunsisf does;
+   a wider one is truncated to 24 bits, as cvt.s.w truncates. */
+uint32_t __floatundisf(uint64_t v) {
+    uint32_t e = 63;
+
+    if ((v >> 32) == 0) {
+        return __floatunsisf((uint32_t)v);
+    }
+    while (!(v >> e)) {
+        e--;
+    }
+    return ((e + 127u) << 23) | ((uint32_t)(v >> (e - 23)) & 0x7FFFFFu);
+}
+#endif

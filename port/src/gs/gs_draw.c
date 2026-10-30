@@ -47,6 +47,7 @@ extern unsigned long long Port_BlankNs(void); /* plat_stub.c: 16.68 ms, less in 
 extern int Port_AspectMilli(void);
 extern void Port_SetAspectMilli(int milli), Port_AudioRefresh(void), Port_SettingsWrite(void);
 extern int gPortMenuMode;       /* headless.c: the menus are running */
+extern int Port_MenusWide(void); /* plat_stub.c: the menu layout "Widescreen" */
 extern int Port_PageAspectMilli(void); /* plat_stub.c: the shape of the page shown now (4:3 in the menus if asked for) */
 extern int gPortMusicPercent, gPortSePercent, gPortVoicePercent, gPortStagePercent;
 
@@ -121,6 +122,7 @@ static int sGlowIsGlare; /* the glow chain under way is the sky's glare (gfxm_a.
 static int sBlockSample; /* the draw being set up reads a work buffer at the GS's 1x (orig.x): pipeline_get, key bit 25 */
 static int sTexPackOn = 1; /* the setting: use the texture pack (if one was found) */
 int gsAnchor;
+static int sMenuFree; /* widescreen menus: the clip being drawn moves (markers 0x2D / 0x2E, gs_marker.c): not cut */
 /* A fight's HUD in a picture wider than 4:3 (setting hud_layout, BT3_HUD=<n> for a test):
      0  the side panels at the screen's edges (as since widescreen)
      1  the same, with the health bars drawn longer, up to the timer (hud_b.c, pull request #28)
@@ -128,6 +130,11 @@ int gsAnchor;
 static int sHudLayout;
 static unsigned sHudFrame;
 static int sHudSeen;
+/* BT3_HUD_LOG (testing): what of a fight's HUD reached the renderer since the last report (gs_gl.c, beside the
+   "gpu:" line): the game's markers by kind (0x10 left, right, centre, end, by position, 0x15 and 0x16 the long
+   health bars, loading, announcement), the primitives drawn after a side's marker, those the renderer kept (not
+   dropped as a PS2-only pass) and of those the 2D ones with alpha 0. */
+unsigned gHudMarks[9], gHudPrims, gHudKept, gHudClear;
 /* 1 = the HUD's side panels were drawn within the last few frames (a few: frames left out by frame skipping). */
 int GsDraw_HudShown(void) {
     return sHudSeen && gGsFrame - sHudFrame <= 6;
@@ -141,13 +148,79 @@ unsigned gsSkipped;
 unsigned gGpuNewTex, gGpuNewTexPixels, gGpuNewPipes; /* created since the front end last cleared them (slow-frame report) */
 unsigned gGpuTexReplaced; /* textures taken from a texture pack so far */
 uint64_t gGpuTexNs, gGpuPipeNs, gGpuEndNs; /* time spent decoding textures, creating pipelines, in GsGpu_FrameEnd */
+/* of gGpuTexNs: the European menu art (MenuLabels_ArtSwap), the checks for battle text, the menus' own text drawn */
+uint64_t gGpuArtNs, gGpuCheckNs, gGpuTextNs;
 /* The same for the picture being drawn only, where it is drawn (the render thread's, or the game's): BT3_DRAW_LOG
    (gs_gpu.c, draw_log). From the start of its list (GsGpu_ListStart). */
 uint64_t gDrawStartNs, gDrawTexNs, gDrawPipeNs, gDrawUpBytes, gDrawImgNs, gDrawLookNs, gDrawVuNs, gDrawXferNs;
 unsigned gDrawNewTex, gDrawImgMade, gDrawImgFreed, gDrawImgPooled; /* (the last three counted in gs_gpu.c: graphics-chip images, uploads) */
 int gDrawLogged; /* the picture's line is written (Smooth motion's other pictures of the list are not) */
 
+/* Widescreen menus: whether a 2D piece is moving (sliding in or out), so that it is not cut at the 4:3 screen's
+   edges: it then comes in from the edge of the wide picture. A piece is known from frame to frame by its first
+   corner's texture coordinates and its size (the one of its kind in the frame: several alike, cells or letters, are taken as still); one whose left edge
+   moved within the last 10 frames is moving. A still one is cut there as before: the game parks pieces just off the
+   4:3 screen, which narrowed would come into sight. */
+#define MOVE_SLOTS 1024
+typedef struct { uint64_t key; float x0, x1; unsigned seen, moved; int count; } MovePiece;
+static MovePiece sMove[MOVE_SLOTS];
+static int menu_piece_moving(const Vtx *v, const Vtx *last, float x0, float x1, float h) {
+    static int off = -1;
+    uint64_t key = 1469598103934665603ull;
+    float st[4];
+    const unsigned char *b = (const unsigned char *)st;
+    unsigned i, slot;
+    MovePiece *m;
+    if (off < 0) {
+        off = getenv("BT3_MENU_MOVECLIP") != NULL; /* (testing: cut moving pieces too, as before) */
+    }
+    if (off) {
+        return 0;
+    }
+    st[0] = v->s;
+    st[1] = v->t;
+    st[2] = last->s;
+    st[3] = last->t;
+    for (i = 0; i < sizeof(st); i++) {
+        key = (key ^ b[i]) * 1099511628211ull;
+    }
+
+    slot = (unsigned)(key ^ (key >> 32)) & (MOVE_SLOTS - 1);
+    for (i = 0; i < 8; i++, slot = (slot + 1) & (MOVE_SLOTS - 1)) {
+        m = &sMove[slot];
+        if (m->key == key || m->key == 0 || gGsFrame - m->seen > 30) {
+            break;
+        }
+    }
+    if (i == 8) {
+        return 0;
+    }
+    if (m->key != key || gGsFrame - m->seen > 30) {
+        m->key = key; m->x0 = x0; m->x1 = x1; m->seen = gGsFrame; m->moved = 0; m->count = 1;
+        return 0;
+    }
+    if (m->seen == gGsFrame) { /* a second one alike in this frame: alike pieces are taken as still */
+        m->count++;
+        return 0;
+    }
+    if (m->count > 1) {
+        m->count = 1;
+        m->x0 = x0;
+        m->x1 = x1;
+        m->seen = gGsFrame;
+        return 0;
+    }
+    if (x0 - m->x0 > 0.25f || m->x0 - x0 > 0.25f || x1 - m->x1 > 0.25f || m->x1 - x1 > 0.25f) {
+        m->moved = gGsFrame;
+    }
+    m->x0 = x0;
+    m->x1 = x1;
+    m->seen = gGsFrame;
+    return m->moved != 0 && gGsFrame - m->moved <= 1; /* (as soon as it stops it is cut: parked off the screen) */
+}
+
 void GsGpu_ListStart(void) {
+    sMenuFree = 0;
     gDrawStartNs = SDL_GetTicksNS(); /* (gs_gpu.c's clock, where it is compared) */
     gDrawTexNs = gDrawPipeNs = gDrawUpBytes = gDrawImgNs = gDrawLookNs = gDrawVuNs = gDrawXferNs = 0;
     gDrawNewTex = gDrawImgMade = gDrawImgFreed = gDrawImgPooled = 0;
@@ -518,6 +591,22 @@ static pthread_cond_t sDecWake = PTHREAD_COND_INITIALIZER, sDecDone = PTHREAD_CO
 static const TexDecode *sDecJob;
 static unsigned sDecGen, sDecNext, sDecBusy;
 static int sDecWorkers = -1;
+/* what each worker is doing, for the Switch's watch thread (GsDraw_DecodeReport): 0 not started yet, 1 waiting for
+   a texture, 2 decoding, 3 done with it */
+static volatile int sDecPhase[8], sDecStarted;
+
+/* One line: the workers and the texture being decoded. The length written. */
+size_t GsDraw_DecodeReport(char *out, size_t cap) {
+    int n = snprintf(out, cap, "texture decoding: %d workers (%d started; phases", sDecWorkers, sDecStarted), i;
+    for (i = 0; i < sDecWorkers && i < 8 && n >= 0 && (size_t)n < cap; i++) {
+        n += snprintf(out + n, cap - (size_t)n, " %d", sDecPhase[i]);
+    }
+    if (n >= 0 && (size_t)n < cap) {
+        n += snprintf(out + n, cap - (size_t)n, "), job %u, %u workers busy, next row %u of %u\n", sDecGen, sDecBusy, sDecNext,
+                      sDecJob != NULL ? sDecJob->th : 0);
+    }
+    return n < 0 ? 0 : (size_t)n < cap ? (size_t)n : cap - 1;
+}
 
 static void tex_decode_share(const TexDecode *d) { /* takes chunks of rows until there are none left */
     for (;;) {
@@ -529,11 +618,13 @@ static void tex_decode_share(const TexDecode *d) { /* takes chunks of rows until
     }
 }
 
-static void *tex_decode_worker(void *unused) {
+static void *tex_decode_worker(void *arg) {
     unsigned seen = 0;
-    (void)unused;
+    int me = (int)(intptr_t)arg & 7;
+    __atomic_add_fetch(&sDecStarted, 1, __ATOMIC_RELAXED);
     for (;;) {
         const TexDecode *d;
+        sDecPhase[me] = 1;
         pthread_mutex_lock(&sDecLock);
         while (sDecGen == seen) {
             pthread_cond_wait(&sDecWake, &sDecLock);
@@ -541,7 +632,9 @@ static void *tex_decode_worker(void *unused) {
         seen = sDecGen;
         d = sDecJob;
         pthread_mutex_unlock(&sDecLock);
+        sDecPhase[me] = 2;
         tex_decode_share(d);
+        sDecPhase[me] = 3;
         pthread_mutex_lock(&sDecLock);
         if (--sDecBusy == 0) {
             pthread_cond_signal(&sDecDone);
@@ -552,21 +645,30 @@ static void *tex_decode_worker(void *unused) {
 }
 
 static void tex_decode(const TexDecode *d) {
+    extern const char *volatile gPortWhere; /* plat_stub.c */
+    gPortWhere = "decoding a texture";
     if (sDecWorkers < 0) {
         const char *e = getenv("BT3_TEX_THREADS");
+#ifdef __SWITCH__
+        int n = e != NULL ? atoi(e) : 2, i; /* (the three cores a game has: the game's thread on one, its sound on another) */
+#else
         int n = e != NULL ? atoi(e) : SDL_GetNumLogicalCPUCores() - 2, i;
+#endif
         sDecWorkers = n < 0 ? 0 : n > 7 ? 7 : n;
+        gPortWhere = "decoding a texture (starting its workers)";
         for (i = 0; i < sDecWorkers; i++) {
             pthread_t t;
-            if (pthread_create(&t, NULL, tex_decode_worker, NULL) != 0) {
+            if (pthread_create(&t, NULL, tex_decode_worker, (void *)(intptr_t)i) != 0) {
                 sDecWorkers = i;
                 break;
             }
             pthread_detach(t);
         }
+        gPortWhere = "decoding a texture";
     }
     if (sDecWorkers == 0 || d->tw * d->th < 16384) { /* (a small one: waking the workers would cost more) */
         tex_decode_rows(d, 0, d->th);
+        gPortWhere = "drawing, after decoding a texture";
         return;
     }
     pthread_mutex_lock(&sDecLock);
@@ -577,11 +679,13 @@ static void tex_decode(const TexDecode *d) {
     pthread_cond_broadcast(&sDecWake);
     pthread_mutex_unlock(&sDecLock);
     tex_decode_share(d);
+    gPortWhere = "decoding a texture (waiting for its workers)";
     pthread_mutex_lock(&sDecLock);
     while (sDecBusy != 0) {
         pthread_cond_wait(&sDecDone, &sDecLock);
     }
     pthread_mutex_unlock(&sDecLock);
+    gPortWhere = "drawing, after decoding a texture";
 }
 
 /* GS memory -> an RGBA texture for the current TEX0 (alpha as stored: 0x80 is opaque). The back end makes
@@ -705,11 +809,15 @@ static GsTex texture_get(int ctx) {
         }
     }
     if (px != NULL && !replaced && bits <= 8) {
+        uint64_t a0 = gpu_now();
         MenuLabels_ArtSwap((unsigned char *)px, (int)tw, (int)th); /* the European picture, in the chosen language */
+        gGpuArtNs += gpu_now() - a0;
     }
     if (px != NULL) {
+        uint64_t c0 = gpu_now();
         MenuText_NewTexture(); /* (its label hash is worked out once, for this check and MenuText_Render below) */
         battleText = MenuText_IsBattleTexture((const uint8_t *)px, (int)tw, (int)th, bits <= 8);
+        gGpuCheckNs += gpu_now() - c0;
     }
     if (replaced) {
         free(px);
@@ -728,6 +836,7 @@ static GsTex texture_get(int ctx) {
             rw = (uint32_t)mw; rh = (uint32_t)mh;
             menuText = 1;
         }
+        gGpuTextNs += gpu_now() - font_t0;
         if (getenv("BT3_FONT_LOG") != NULL) { /* what a font setting costs: every decoded texture, and the time the text took */
             fprintf(stderr, "font: frame %u: %ux%u %s %.3f ms\n", gGsFrame, (unsigned)tw, (unsigned)th, text != NULL ? "drawn" : "left",
                     (double)(gpu_now() - font_t0) / 1e6);
@@ -1437,14 +1546,17 @@ void GsGpu_Draw(int type, int ctx, const GsVertex *v) {
     float s[3], t[3], q[3];
     const GsVertex *flat = &v[n - 1];
     GsDraw d, *last;
-    int i, packed2d = 0;
+    int i, packed2d = 0, side = gsAnchor == 1 || gsAnchor == 2 || gsAnchor == 5 || gsAnchor == 6;
 
+    gHudPrims += side;
     if (gsVertCount + 6 > MAX_VERTS || gsDrawCount == MAX_DRAWS) {
         return;
     }
     if (!draw_state(ctx, type == 1 ? 1 : type == 0 ? 2 : 0, type == 6, 0, &d, &us, &vs)) {
         return;
     }
+    gHudKept += side;
+    gHudClear += side && (type == 6 || fst) && v[type == 6 ? 1 : 0].a == 0;
     int battleText = !d.tex_is_target && sLast != NULL && sLast->tex == d.tex && sLast->battleText;
     int tbo = (prim >> 4) & 1 && ((t0 >> 20) & 0x3F) == TBO_PSM; /* a Tenkaichi Budokai Online picture */
     if (type == 6 || fst) {
@@ -1617,9 +1729,9 @@ void GsGpu_Draw(int type, int ctx, const GsVertex *v) {
     /* (Not the cross-fade's picture: it is the whole frame as it was shown, wide view and all, drawn back over the
        whole frame in strips. Each strip is narrower than the screen, so the rule below took it for a piece of 2D
        art and the old shot was drawn at three quarters of the width over the new one: seen by the user.) */
-    if (Port_IsWide() && (!gPortMenuMode || (gsAnchor == 7 && Port_PageAspectMilli() > 1340) ||
+    if (Port_IsWide() && (!gPortMenuMode || ((gsAnchor == 9 || (gsAnchor >= 11 && gsAnchor <= 19)) && Port_MenusWide()) || (gsAnchor == 7 && Port_PageAspectMilli() > 1340) ||
                           (battleText && Port_PageAspectMilli() > 1340)) &&
-        !sWholeFrame && !d.tex_is_target && !tbo && (type == 6 || fst || battleText || gsAnchor == 8) &&
+        !sWholeFrame && !d.tex_is_target && !tbo && (type == 6 || fst || battleText || gsAnchor == 8 || (gPortMenuMode && gsAnchor >= 9)) &&
         gsTargets[d.target].fbp == (uint32_t)gGsMainFbp) {
         /* Widescreen. The 3D scene is projected for a 16:9 picture by the game itself; 2D art is laid out for
            4:3 and would come out a third too wide. Each 2D piece is narrowed to 3/4 about a fixed point:
@@ -1643,6 +1755,38 @@ void GsGpu_Draw(int type, int ctx, const GsVertex *v) {
         }
         if (type == 6 && !d.mode[0] && y1 - y0 >= 400.0f && !battleText) {
             pivot = -1.0f;
+        } else if ((gsAnchor == 9 || gsAnchor == 11 || gsAnchor == 12 || gsAnchor == 16 || gsAnchor == 17 || gsAnchor == 18 || (gsAnchor >= 13 && gsAnchor <= 15 && !d.mode[0])) && x0 <= 0.5f &&
+                   x1 >= 511.5f) {
+            /* (in a widescreen menu page, a piece as wide as the whole 4:3 screen is scenery or a tint over all of
+               it: it fills the width; untextured (a fade, a tint), in a part that keeps such pieces too as well.
+               A menu's untextured pieces narrower than that, a plate's plain body, keep their shape as its art does) */
+            pivot = -1.0f;
+        } else if (gsAnchor == 9 || (gsAnchor >= 11 && gsAnchor <= 19)) {
+            /* A menu screen converted for widescreen (Port_MenuPage, gs_marker.c): each part at its true shape about
+               the middle, the left edge or the right edge, the long bars too (some of a bar's pieces are wider than
+               480, some not: they have to stay together). What fills the width is marked 10 and not narrowed. */
+            pivot = gsAnchor == 11 || gsAnchor == 14 ? 0.0f : gsAnchor == 12 || gsAnchor == 15 ? 512.0f : 256.0f;
+            int corner = gsAnchor == 16 || gsAnchor == 17 || gsAnchor == 18 || (gsAnchor == 13 && x1 - x0 <= 260.0f && y1 <= 140.0f);
+            /* (13, character select: only a sprite the size of a corner's cloud, not the big pictures from the top) */
+            if ((corner && y0 <= 8.0f && x0 >= 256.0f && x1 >= 511.5f) ||
+                (gsAnchor == 17 && y1 <= 120.0f && x0 >= 256.0f)) {
+                pivot = 512.0f; /* (a page's piece from the top edge, in the right half against the edge: the corner's clouds;
+                                   17: any in the top 120 lines starting in the right half, the shop's counters with their
+                                   icons and frames) */
+            } else if (gsAnchor == 17) {
+                pivot = -1.0f; /* (17, the item shop: the rest of the page is its room, scenery that fills the width) */
+            } else if (gsAnchor == 18 && x1 >= 511.5f && x0 >= 200.0f) {
+                pivot = 512.0f; /* (18: a page's piece cut off at the right edge: a frame whose art is cut there) */
+            } else if (gsAnchor == 18 && x0 <= 0.5f && x1 <= 312.0f) {
+                pivot = 0.0f;
+            } else if (corner && y0 <= 8.0f && x1 <= 256.0f && x0 <= 0.5f) {
+                pivot = 0.0f;
+            }
+            if (gsAnchor == 11 && x0 >= 256.0f && x1 >= 511.5f) {
+                pivot = 512.0f; /* (a piece of a left column that lies in the right half against its edge: there) */
+            } else if (gsAnchor == 12 && x1 <= 256.0f && x0 <= 0.5f) {
+                pivot = 0.0f;
+            }
         } else if (x1 - x0 >= 480.0f && gsAnchor != 5 && gsAnchor != 6 && gsAnchor != 8 && !battleText) {
             /* Other screen-wide flashes and speed lines still reach the edges. Announcement bands and streaks
                follow their word's width so the mask and additive layers stay together. */
@@ -1671,6 +1815,33 @@ void GsGpu_Draw(int type, int ctx, const GsVertex *v) {
             float narrow = 1333.333f / (float)Port_AspectMilli(); /* 3/4 at 16:9, 9/16 at 21:9 */
             for (k = d.first; k < gsVertCount; k++) {
                 gsVerts[k].x = pivot + (gsVerts[k].x - pivot) * narrow;
+            }
+            static int noclip = -1;
+            if (noclip < 0) {
+                noclip = getenv("BT3_MENU_NOCLIP") != NULL;
+            }
+            if ((gsAnchor == 9 || (gsAnchor >= 11 && gsAnchor <= 19)) && (d.scissor[0] > 0 || d.scissor[0] + d.scissor[2] < 512 * SCALE)) {
+                /* The game's own clipping window (a roster's bar, which cells scroll through) is in the 4:3 screen's
+                   positions: it is narrowed about the same point as the piece, or the cells moved out of it and were
+                   cut while scrolling (the more, the wider the picture) */
+                float a = (float)d.scissor[0] / (float)SCALE, b = (float)(d.scissor[0] + d.scissor[2]) / (float)SCALE;
+                a = pivot + (a - pivot) * narrow;
+                b = pivot + (b - pivot) * narrow;
+                d.scissor[0] = (int)(a * (float)SCALE);
+                d.scissor[2] = (int)(b * (float)SCALE + 0.5f) - d.scissor[0];
+            }
+            if ((gsAnchor == 9 || (gsAnchor >= 11 && gsAnchor <= 19)) && !noclip && !(gsAnchor == 13 && y1 - y0 >= 300.0f) && gsAnchor != 19 &&
+                !sMenuFree && !menu_piece_moving(&gsVerts[d.first], &gsVerts[gsVertCount - 1], x0, x1, y1 - y0)) {
+                /* and what lies beyond the page's edge (plates sliding in) stays out of sight, as on the 4:3 screen.
+                   Not character select's big pictures (13, taller than 300): they slide outwards when a stage is
+                   chosen, and are not parked off the screen. */
+                int lo = (int)((pivot - pivot * narrow) * (float)SCALE), hi = (int)((pivot + (512.0f - pivot) * narrow) * (float)SCALE + 0.5f);
+                int r = d.scissor[0] + d.scissor[2];
+                d.scissor[0] = d.scissor[0] > lo ? d.scissor[0] : lo;
+                d.scissor[2] = (r < hi ? r : hi) - d.scissor[0];
+                if (d.scissor[2] < 0) {
+                    d.scissor[2] = 0;
+                }
             }
         }
     }
@@ -1940,8 +2111,15 @@ void GsGpu_Native(int effect) {
     uint64_t sc = gGs.scissor[0];
     GsDraw d;
 
+    if (effect >= 0x10 && effect <= 0x18) {
+        gHudMarks[effect - 0x10]++;
+    }
     /* 1 = outline. 2 (the see-through tint) is drawn by the generic table pass now (depth_clut), from the game's
        own table. */
+    if (effect >= 0x22 && effect <= 0x2C) { /* widescreen menus: centre / fill / left / right; centre, left, right, bars too; page; top; edge */
+        gsAnchor = effect - 0x22 + 9;
+        return;
+    }
     if (effect >= 0x15 && effect <= 0x18) {
         /* 5/6: extended life bar; 7: loading page; 8: an announcement and all its effect layers. */
         gsAnchor = effect - 0x10;
@@ -1953,6 +2131,10 @@ void GsGpu_Native(int effect) {
     }
     if (effect == 0x20 || effect == 0x21) { /* the glow chain begins / ends (target_lowres) */
         sInGlowChain = effect == 0x20;
+        return;
+    }
+    if (effect == 0x2D || effect == 0x2E) {
+        sMenuFree = effect == 0x2D;
         return;
     }
     if (effect != 1 || gsDrawCount == MAX_DRAWS || (gsFxOff & 1)) {
@@ -1978,6 +2160,10 @@ static void scale_apply(void) {
     if (gsPendingScale == 0 || gsPendingScale == gsScale) {
         gsPendingScale = 0;
         return;
+    }
+    {
+        extern void GsGl_Drain(void); /* gs_gl.c: the frame the GL thread is drawing, at the scale it was recorded at */
+        GsGl_Drain();
     }
     gsScale = gsPendingScale; /* the back end's attachments and copies are rebuilt to this size */
     gsPendingScale = 0;
@@ -2120,7 +2306,11 @@ void GsGpu_SetSettings(const PortVideo *v) {
     PortVideo now;
     GsGpu_GetSettings(&now);
     if (v->scale != now.scale) {
+#ifdef __SWITCH__
+        gsPendingScale = v->scale < 1 ? 1 : v->scale > 3 ? 3 : v->scale; /* applied between two frames (1x to 3x there) */
+#else
         gsPendingScale = v->scale < 1 ? 1 : v->scale > 8 ? 8 : v->scale; /* applied between two frames */
+#endif
     }
     if (v->aspectMilli != now.aspectMilli) {
         Port_SetAspectMilli(v->aspectMilli);
@@ -2182,8 +2372,15 @@ int GsGpu_Init(void) {
     const char *api = getenv("BT3_GPU_API");
     GsBackend *sb;
 
+#ifdef __SWITCH__
+    /* 1x to 3x (4x and up ran out of memory on a console and closed the game), 1x unless chosen (what the GPU keeps up
+       with at its stock clock) */
+    gsScale = getenv("BT3_SCALE") != NULL ? atoi(getenv("BT3_SCALE")) : Port_Setting("scale", 1);
+    gsScale = gsScale < 1 ? 1 : gsScale > 3 ? 3 : gsScale;
+#else
     gsScale = getenv("BT3_SCALE") != NULL ? atoi(getenv("BT3_SCALE")) : Port_Setting("scale", 2);
     gsScale = gsScale < 1 ? 1 : gsScale > 8 ? 8 : gsScale;
+#endif
     gsPendingScale = 0;
     gsVerts = malloc(MAX_VERTS * sizeof(Vtx));
     gsVuVerts = malloc(MAX_VU_VERTS * 48);
@@ -2195,6 +2392,9 @@ int GsGpu_Init(void) {
     if (api == NULL || strcmp(api, "auto") == 0) {
         /* the settings window's choice (Renderer; Vulkan unless OpenGL was picked there) */
         sb = Port_Setting("gpu_api", 0) == 1 ? &sGlBackend : &sVulkanBackend;
+#ifdef __SWITCH__
+        sb = &sGlBackend; /* the Switch: OpenGL through Mesa only (no SDL_GPU there; docs/port/switch_plan.md) */
+#endif
         api = NULL;
     } else if (strcmp(api, "vk") == 0 || strcmp(api, "vulkan") == 0) {
         sb = &sVulkanBackend;
@@ -4676,6 +4876,14 @@ int gsSkipFrame;
 static int sSkipOn = -1, sSkipRun;
 static unsigned sSkipped; /* (BT3_GS_VERBOSE) */
 
+/* A tick was left out in the last 60: the machine is not keeping up, and the pad read does not wait for the render
+   thread's drawing (gs_core.c, Gs_RenderListWait): waiting there left the render thread idle while the game then
+   computed its tick, at the Switch's stock clock 40% of the game's thread. */
+static unsigned sSkipLastFrame;
+int GsDraw_SkippedRecently(void) {
+    return sSkipLastFrame != 0 && gGsFrame - sSkipLastFrame < 60;
+}
+
 int GsDraw_FrameSkip(void) {
     if (sSkipOn < 0) {
         sSkipOn = getenv("BT3_FRAME_SKIP") != NULL ? atoi(getenv("BT3_FRAME_SKIP")) != 0 : Port_Setting("frame_skip", 1) != 0;
@@ -4703,6 +4911,9 @@ static void skip_decide(void) {
     (void)gPortNetWindowClose;
     sSkipRun = skip ? sSkipRun + 1 : 0;
     sSkipped += (unsigned)skip;
+    if (skip) {
+        sSkipLastFrame = gGsFrame ? gGsFrame : 1;
+    }
     gsSkipFrame = skip;
     if (getenv("BT3_GS_VERBOSE") != NULL && gGsFrame % 120 == 0 && sSkipped != 0) {
         fprintf(stderr, "skip: %u ticks were not shown in the last 120 pictures (the game was %d.%d ms behind just now)\n", sSkipped, behind / 1000, behind / 100 % 10);
@@ -4711,6 +4922,14 @@ static void skip_decide(void) {
 }
 
 void GsGpu_FrameEnd(void) {
+    extern const char *volatile gPortWhere; /* plat_stub.c */
+    extern int GsGl_Split(void);            /* gs_gl.c */
+    if (gsInterp > 0 && GsGl_Split()) {
+        /* Smooth motion's pictures are drawn from the frame's arrays as they are swapped in and out here, which the GL
+           thread's hand-over of the arrays (gs_gl.c, frame_end) does not allow for: off with the GL thread. */
+        gsInterp = 0;
+    }
+    gPortWhere = "showing a picture (the frame's end)";
     sInGlowChain = 0; /* (a chain is always within one frame) */
     if (gPortResim) { /* a frame that is only being re-run: nothing was recorded, nothing is shown */
         return;
@@ -4726,6 +4945,21 @@ void GsGpu_FrameEnd(void) {
         sInterpPrevPrimCount = 0;
         gsVertCount = gsVuVertCount = gsVuIdxCount = gsVuUniCount = gsDrawCount = 0;
         skip_decide();
+        {
+            /* A picture uploaded straight into a display buffer in the skipped tick (the movies: gs_core.c,
+               transfer_data) had its copy into the buffer's texture among the draws just dropped, while the
+               upload stays marked, so the next tick did not record the copy again: the buffer shown kept an older
+               picture, or none (black). The intro movie flickered so on the Switch, where its frames take 90 ms
+               at the stock clock and most ticks were skipped. The copy is recorded again, first in the next
+               tick's draws (GsGpu_FbUpload records nothing if that tick is skipped too; then again after it). */
+            extern unsigned gGsFbUploads; /* gs_core.c */
+            if (gGsFbUploads & 1u) {
+                GsGpu_FbUpload(0);
+            }
+            if (gGsFbUploads & 2u) {
+                GsGpu_FbUpload(1);
+            }
+        }
         return;
     }
     uint64_t t0 = gpu_now();
@@ -4743,6 +4977,12 @@ void GsGpu_FrameEnd(void) {
         if (gsInterp < 0) {
             gsInterp = getenv("BT3_INTERP") != NULL ? atoi(getenv("BT3_INTERP")) : Port_Setting("interp", 0);
             gsInterp = gsInterp < 0 ? 0 : gsInterp > 3 ? 3 : gsInterp;
+            if (GsGl_Split()) {
+                gsInterp = 0; /* (see the top of this function) */
+            }
+#ifdef __SWITCH__
+            gsInterp = 0; /* (no Smooth motion on the Switch: an in-between picture is another pass through OpenGL, more than a tick holds) */
+#endif
             sInterpPrev = malloc(MAX_VU_UNIFORMS * sizeof(Vu0Uniform));
             sInterpBlend = malloc(MAX_VU_UNIFORMS * sizeof(Vu0Uniform));
             sInterpPrevSig = malloc(MAX_VU_UNIFORMS * sizeof(uint32_t));

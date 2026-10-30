@@ -6,7 +6,7 @@ import os, pathlib, re, subprocess
 
 import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from toolchain import ROOT, VARIANT, WIN, MAC, PREFIX, OBJ, DATA, EXE, sdl3
+from toolchain import ROOT, VARIANT, WIN, MAC, NX, NX_WINDOW, NX_ARCH, DEVKITPRO, PREFIX, OBJ, DATA, EXE, sdl3, dkp
 
 B = ROOT / "port/build"
 
@@ -45,11 +45,69 @@ def link_mac(objs, extra):
     segs = [s for s in mac_segments(EXE) if s[0] != "__PAGEZERO"]
     first = min(a for _, a, _ in segs)
     moved = [f"-Wl,-segaddr,{s},{MAC_BASE + a - first:#x}" for s, a, _ in segs if s != "__LINKEDIT"]
-    return subprocess.run(cmd + moved, capture_output=True, text=True)
+    r = subprocess.run(cmd + moved, capture_output=True, text=True)
+    if r.returncode == 0:
+        mac_pagezero(EXE)
+    return r
+
+def mac_pagezero(exe):
+    """A page zero of 4 GB in the program's header. Some linkers (Xcode 16's on GitHub's Mac) leave it 0 bytes when
+    every segment is moved with -segaddr, -pagezero_size or not, and macOS on Apple Silicon kills such a program
+    before it starts, without a word (found by josehs08). Nothing else lies below 4 GB here (the program is at 1 TB),
+    so the header's vmsize is set and the program signed again (ad hoc)."""
+    import struct
+    data = bytearray(exe.read_bytes())
+    magic, _, _, _, ncmds = struct.unpack_from("<IiiII", data, 0)
+    if magic != 0xFEEDFACF:
+        return
+    off = 32
+    for _ in range(ncmds):
+        cmd, size = struct.unpack_from("<II", data, off)
+        if cmd == 0x19 and data[off + 8:off + 24].rstrip(b"\0") == b"__PAGEZERO":  # LC_SEGMENT_64
+            vmaddr, vmsize = struct.unpack_from("<QQ", data, off + 24)
+            if vmaddr == 0 and vmsize < 0x100000000:
+                struct.pack_into("<Q", data, off + 32, 0x100000000)
+                exe.write_bytes(data)
+                subprocess.run(["codesign", "--force", "--sign", "-", str(exe)], check=True, capture_output=True)
+                print(f"__PAGEZERO {vmsize:#x} -> 4 GB")
+            return
+        off += size
+
+# libnx's file service calls, counted by port/src/plat_nxfs.c, and fopen (its files get a larger buffer there)
+NX_FS_WRAPPED = ["fsFsCreateFile", "fsFsDeleteFile", "fsFsCreateDirectory", "fsFsRenameFile", "fsFsRenameDirectory",
+                 "fsFsGetEntryType", "fsFsGetFileTimeStampRaw", "fsFsOpenFile", "fsFsOpenDirectory", "fsFileRead",
+                 "fsFileWrite", "fsFileFlush", "fsFileGetSize", "fsFileSetSize", "fsFileClose", "fsDirRead", "fsDirClose", "fopen"]
+
+def link_nx(objs, extra):
+    """The Switch: devkitA64's linker with libnx, NOT position-independent (port/switch/nx.specs: libnx's own specs
+    without -pie), the program at the window + 0x20000000 (__start__, where libnx's linker script begins). The
+    game's main() wrapped as on Linux (plat_mem.c); --wrap=Progress_Main and --defsym are done by macwin.py, as on
+    macOS. The result is an ELF that the launcher loads at that address or, moved by a multiple of 4 GB, into
+    another window (its relocations kept for nx_reloc.py; docs/port/switch_plan.md)."""
+    dyn = B / "obj_nx64_dynamic.o"
+    r = subprocess.run([dkp("gcc")] + NX_ARCH + ["-c", str(ROOT / "port/switch/nx_dynamic.s"), "-o", str(dyn)], capture_output=True, text=True)
+    if r.returncode:
+        return r
+    env = dict(os.environ, DEVKITPRO=str(DEVKITPRO))
+    # (gcc, not g++: the stubs are C; the C++ library for the settings window is named)
+    cmd = [dkp("gcc"), f"-specs={ROOT / 'port/switch/nx.specs'}"] + NX_ARCH + ["-w", "-o", str(EXE)] + extra + objs + [str(dyn)] + \
+          ([f"-L{sdl3() / 'lib'}", "-lSDL3"] if sdl3() else []) + \
+          ["-lEGL", "-lglapi", "-ldrm_nouveau"] + \
+          [f"-L{DEVKITPRO}/portlibs/switch/lib", f"-L{DEVKITPRO}/libnx/lib", "-lstdc++",
+           "-lcurl", "-lz",  # (the automatic update's HTTPS: devkitPro's curl, its TLS the console's own)
+           "-lnx", "-lm",
+           f"-Wl,--defsym=__start__={NX_WINDOW + 0x20000000:#x}", "-Wl,--wrap=main", f"-Wl,-Map={EXE}.map",
+           "-Wl,--emit-relocs"] + \
+          [f"-Wl,--wrap={f}" for f in NX_FS_WRAPPED]  # (kept for nx_reloc.py: the launcher may load the program into another window)
+    argsfile = B / "link_nx64.rsp"
+    argsfile.write_text("\n".join('"' + a + '"' for a in cmd[1:]))
+    return subprocess.run([cmd[0], "@" + str(argsfile)], capture_output=True, text=True, env=env)
 
 def link(objs, extra):
     if MAC:
         return link_mac(objs, extra)
+    if NX:
+        return link_nx(objs, extra)
     common = ["-Wl,--defsym=D_3BE71C=0x3BE71C", "-Wl,--wrap=Progress_Main", f"-Wl,-Map={EXE}.map"]
     if WIN:
         # Windows: the program at a fixed address below 4 GB (no relocation: the game's 4-byte pointers and the
@@ -97,6 +155,12 @@ def main():
     if r.returncode == 0 and (DATA / "SKELETON").exists():
         # built from the blank data tables: the program needs the list of where their values are on the user's disc
         d = subprocess.run([sys.executable, str(ROOT / "port/tools/make_dat.py")], capture_output=True, text=True)
+        print((d.stdout + d.stderr).strip()[-300:])
+        if d.returncode:
+            sys.exit(1)
+    if r.returncode == 0 and NX:
+        # the Switch: what the launcher moves when it loads the program into another window (nx_reloc.py)
+        d = subprocess.run([sys.executable, str(ROOT / "port/tools/nx_reloc.py")], capture_output=True, text=True)
         print((d.stdout + d.stderr).strip()[-300:])
         if d.returncode:
             sys.exit(1)

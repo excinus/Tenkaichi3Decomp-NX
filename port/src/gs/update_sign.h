@@ -8,9 +8,10 @@
 extern "C" {
 #endif
 
-/* A release's number: "0.1.38.9" or "v0.1.38.9", two to four numbers. 1 and the numbers in out (missing ones 0), or
+/* A release's number: "0.1.38.9" or "v0.1.38.9", two to four numbers, and for a Switch release of this fork
+   "-nx<N>" after them ("0.1.38.9-nx2": its 5th number, 0 without). 1 and the numbers in out (missing ones 0), or
    0 for anything else ("dev", "0.1.39-rc1", ""). */
-int UpdateVer_Parse(const char *text, int out[4]);
+int UpdateVer_Parse(const char *text, int out[5]);
 /* -1: a is older than b, 0 the same, 1 newer; -2: either is not a release's number (a "dev" build: never updated). */
 int UpdateVer_Compare(const char *a, const char *b);
 

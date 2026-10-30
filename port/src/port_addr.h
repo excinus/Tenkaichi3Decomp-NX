@@ -3,7 +3,8 @@
    The game keeps addresses in 4 bytes (its pointers, the DMA chains, the hardware registers). On Linux and Windows a
    game address IS the host address: everything the game can reach lies below 4 GB. On macOS the low 4 GB cannot be
    mapped, and a game address is an offset in a 4 GB window that starts 0x20000000 below the program
-   (port/tools/macwin/macwin.cpp, docs/port/macos_plan.md).
+   (port/tools/macwin/macwin.cpp, docs/port/macos_plan.md); on the Switch likewise, the window at a fixed address
+   (docs/port/switch_plan.md).
 
    Port_Ptr: a game address (a 4-byte value read from the game's memory, a PS2 address) -> a pointer to use here.
    Port_Addr: a pointer to memory the game can reach -> the game address to hand it or to store in its memory.
@@ -13,9 +14,16 @@
 #define PORT_ADDR_H
 #include <stdint.h>
 
+#if defined(__APPLE__) || defined(__SWITCH__)
 #ifdef __APPLE__
 #include <mach-o/ldsyms.h> /* _mh_execute_header: the program's first byte */
 #define PORT_WINDOW ((uintptr_t)&_mh_execute_header - 0x20000000u)
+#else
+/* The Switch: the 4 GB window the launcher chose and loaded the program into (at + 0x20000000), found by the program
+   from where it is (Port_Window, plat_mem.c; docs/port/switch_plan.md). */
+extern void *Port_Window;
+#define PORT_WINDOW ((uintptr_t)Port_Window)
+#endif
 static inline void *Port_Ptr(uint32_t addr) {
     return addr != 0 ? (void *)(PORT_WINDOW + addr) : (void *)0;
 }

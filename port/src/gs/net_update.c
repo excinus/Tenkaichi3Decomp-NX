@@ -31,7 +31,10 @@
  *      Nothing is ever deleted but those .old files and the update's own downloads.
  *
  * HTTPS as the rest of the port has it (gs/net_match.c): WinHTTP on Windows, the system's curl library on Linux, and
- * failing those the `curl` program (BT3_MATCH_CURL=1 asks for the program).
+ * failing those the `curl` program (BT3_MATCH_CURL=1 asks for the program). The Switch (docs/port/switch_plan.md,
+ * phase 5): devkitPro's curl linked in, whose TLS is the console's own (its ssl service and certificates); this fork's
+ * releases and key (port_release.h, update_key.h), Tenkaichi3Decomp-switch.zip; and no second program to start: the
+ * game ends into its launcher, which says the update is in and to start the game again (update/restart.txt).
  * Testing: BT3_UPDATE_API=<http://host:port> asks there instead of https://api.github.com (a local stand-in that
  * serves .../releases/latest and the files it names); BT3_UPDATE_FAIL_AT=<n> makes the n-th swap of step b fail.
  */
@@ -67,6 +70,9 @@ int UpdCrypto_Check(const uint8_t sig[64], const uint8_t pub[32], const uint8_t 
 #ifdef _WIN32
 #define ASSET GAME "-windows-x64.zip"
 #define GAME_EXE GAME ".exe"
+#elif defined(__SWITCH__)
+#define ASSET GAME "-switch.zip"
+#define GAME_EXE GAME /* (the ELF the launcher loads) */
 #else
 #define ASSET GAME "-linux-x64.zip"
 #define GAME_EXE GAME
@@ -229,6 +235,16 @@ static int http_native(const char *url, int json, Sink *s) {
     return ok && !s->bad;
 }
 #else
+#ifdef __SWITCH__
+/* devkitPro's curl (portlibs, linked by port/tools/link.py), as the library Linux loads below */
+void *curl_easy_init(void);
+int curl_easy_setopt(void *h, int option, ...);
+int curl_easy_perform(void *h);
+void curl_easy_cleanup(void *h);
+void *curl_slist_append(void *list, const char *line);
+void curl_slist_free_all(void *list);
+int Port_NxNetUp(void); /* plat_nxpad.c: the console's sockets, once */
+#endif
 /* Linux: the system's curl library, loaded when first needed (as gs/net_match.c does). */
 static size_t curl_write(char *data, size_t size, size_t count, void *user) {
     return sink_put((Sink *)user, data, size * count) ? size * count : 0;
@@ -256,6 +272,18 @@ static int http_native(const char *url, int json, Sink *s) {
         static const char *const names[] = {"libcurl.so.4", "libcurl-gnutls.so.4", "libcurl.so"};
         size_t i;
         tried = 1;
+#ifdef __SWITCH__
+        (void)names;
+        (void)i;
+        if (Port_NxNetUp()) {
+            init = curl_easy_init;
+            setopt = curl_easy_setopt;
+            perform = curl_easy_perform;
+            cleanup = curl_easy_cleanup;
+            append = curl_slist_append;
+            freeall = curl_slist_free_all;
+        }
+#else
         for (i = 0; lib == NULL && i < sizeof(names) / sizeof(names[0]); i++) {
             lib = SDL_LoadObject(names[i]);
         }
@@ -267,6 +295,7 @@ static int http_native(const char *url, int json, Sink *s) {
             append = (append_fn)SDL_LoadFunction(lib, "curl_slist_append");
             freeall = (freeall_fn)SDL_LoadFunction(lib, "curl_slist_free_all");
         }
+#endif
     }
     if (init == NULL || setopt == NULL || perform == NULL || cleanup == NULL || append == NULL || freeall == NULL || (h = init()) == NULL) {
         return 0;
@@ -303,6 +332,10 @@ static int http_program(const char *url, int json, const char *path, Sink *s) {
     const char *args[24];
     int n = 0, code = -1;
     SDL_Process *p;
+#ifdef __SWITCH__
+    (void)url, (void)json, (void)path, (void)s, (void)args, (void)n, (void)code, (void)p;
+    return 0; /* (no programs to start there) */
+#endif
 #ifdef _WIN32
     args[n++] = "curl.exe";
 #else
@@ -1256,6 +1289,24 @@ int Update_Relaunch(void) {
     if (SDL_GetAtomicInt(&sU.state) != UPD_INSTALLED) {
         return 0;
     }
+#ifdef __SWITCH__
+    /* The Switch: the game ends into its launcher (port/switch/launcher), which sees this file and says that the
+       update is in and to start the game again. (Loading it a second time in the same process is not safe: the
+       first one's memory stays mapped, and its threads may still run; docs/port/switch_plan.md, "The launcher".) */
+    (void)args, (void)props, (void)p;
+    lock();
+    SDL_snprintf(exe, sizeof(exe), "%s\n", sU.latest);
+    unlock();
+    {
+        char path[1300];
+        SDL_snprintf(path, sizeof(path), "%srestart.txt", sU.work);
+        if (!write_file(path, exe, strlen(exe), 0644)) {
+            return 0;
+        }
+    }
+    fprintf(stderr, "bt3: update: installed; the game ends into its launcher, to be started again\n");
+    return 1;
+#endif
     SDL_snprintf(exe, sizeof(exe), "%s" GAME_EXE, sU.root);
     args[0] = exe;
     args[1] = NULL;

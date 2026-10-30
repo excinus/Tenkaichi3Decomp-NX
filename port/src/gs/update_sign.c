@@ -5,11 +5,11 @@
 #include <SDL3/SDL.h>
 #include <string.h>
 
-int UpdateVer_Parse(const char *text, int out[4]) {
+int UpdateVer_Parse(const char *text, int out[5]) {
     int n = 0, i;
     const char *p = text;
 
-    for (i = 0; i < 4; i++) {
+    for (i = 0; i < 5; i++) {
         out[i] = 0;
     }
     if (p == NULL) {
@@ -32,6 +32,14 @@ int UpdateVer_Parse(const char *text, int out[4]) {
         if (*p == '\0') {
             break;
         }
+        if (*p == '-' && p[1] == 'n' && p[2] == 'x' && p[3] >= '1' && p[3] <= '9' && n >= 2) {
+            /* a Switch release of this fork (docs/port/switch_plan.md, phase 5): "0.1.39.2-nx3", the 3rd of 0.1.39.2 */
+            for (p += 3, v = 0, digits = 0; *p >= '0' && *p <= '9' && digits < 9; digits++) {
+                v = v * 10 + (*p++ - '0');
+            }
+            out[4] = (int)v;
+            return *p == '\0';
+        }
         if (*p != '.') {
             return 0; /* "0.1.39-rc1", "dev": not a release's number */
         }
@@ -41,11 +49,11 @@ int UpdateVer_Parse(const char *text, int out[4]) {
 }
 
 int UpdateVer_Compare(const char *a, const char *b) {
-    int x[4], y[4], i;
+    int x[5], y[5], i;
     if (!UpdateVer_Parse(a, x) || !UpdateVer_Parse(b, y)) {
         return -2;
     }
-    for (i = 0; i < 4; i++) {
+    for (i = 0; i < 5; i++) {
         if (x[i] != y[i]) {
             return x[i] < y[i] ? -1 : 1;
         }

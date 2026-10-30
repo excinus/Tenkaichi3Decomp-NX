@@ -53,6 +53,10 @@ static void regions_init(void) {
 #elif defined(__APPLE__)
     uint32_t cap = sizeof(exe) - 1;
     long n = _NSGetExecutablePath(exe, &cap) == 0 ? (long)strlen(exe) : -1;
+#elif defined(__SWITCH__) /* (the path the launcher started it with) */
+    extern int __system_argc;
+    extern char **__system_argv;
+    long n = __system_argc > 0 && __system_argv[0] != NULL ? (long)snprintf(exe, sizeof(exe), "%s", __system_argv[0]) : -1;
 #else
     long n = (long)readlink("/proc/self/exe", exe, sizeof(exe) - 1);
 #endif
@@ -74,14 +78,14 @@ static void regions_init(void) {
             int marks = 0;
             while (sRegions < MAX_REGIONS - 2 && fscanf(fp, "%llx %llx", &a, &size) == 2) {
                 if (a < 2) {
-#ifdef __APPLE__ /* (the list holds game addresses: offsets in the window, port_addr.h) */
+#if defined(__APPLE__) || defined(__SWITCH__) /* (the list holds game addresses: offsets in the window, port_addr.h) */
                     marks += size == Port_Addr(a == 0 ? (const void *)&gPortResim : (const void *)&gPortVBlanks);
 #else
                     marks += (uintptr_t)size == (a == 0 ? (uintptr_t)&gPortResim : (uintptr_t)&gPortVBlanks);
 #endif
                     continue;
                 }
-#ifdef __APPLE__
+#if defined(__APPLE__) || defined(__SWITCH__)
                 sRegion[sRegions].p = (const uint8_t *)Port_Ptr((uint32_t)a);
 #else
                 sRegion[sRegions].p = (const uint8_t *)(uintptr_t)a;

@@ -39,6 +39,7 @@ static int sFromMenu;
    set up without menus (below); otherwise the real menus run (the overlay's Progress_Main, src/menu/menu_a_b.c). */
 extern int __real_Progress_Main(int arg);
 int gPortMenuMode;
+int gPortInMenus; /* the menus run (Progress_Main), their 3D viewer included: the Switch's A / B layout (gs_input.c) */
 /* A menu screen that is a 3D scene (the character reference's model viewer) asks, every frame, to be shown as a
    fight is while it runs: the wide projection, 2D kept in proportion. Only between the two lines of Progress_Main
    below that set and clear the menu mode. */
@@ -174,6 +175,17 @@ int __wrap_Progress_Main(int arg) {
                             time == 0 ? "60" : time == 1 ? "90" : time == 2 ? "180" : time == 3 ? "240" : "none");
                 }
             }
+            {   /* BT3_MENU_MODE=<n> (testing): the menus start at progress mode n instead of the title (src/menu/menu_a_b.c:
+                   6 Dragon History, 13 Ultimate Battle, 33 World Tournament, 38 the versus menu, 44 Training, 48 Evolution Z,
+                   53 the disc fusion, 60 Character Reference, 62 Options, 70 Shenron): its screens, seen without the way
+                   there being pressed */
+                static int modeEntered;
+
+                if (!modeEntered && getenv("BT3_MENU_MODE") != NULL && !Port_NetSession() && gProgress != NULL && gSaveData != NULL) {
+                    modeEntered = 1;
+                    gProgress->mode = atoi(getenv("BT3_MENU_MODE"));
+                }
+            }
             {   /* BT3_TBO=1 (testing): the first menu is Tenkaichi Budokai Online's (src/menu/port_tbo.c), not the
                    title: its screens, a lobby's included (BT3_LOBBY), without a button pressed */
                 static int tboEntered;
@@ -186,8 +198,10 @@ int __wrap_Progress_Main(int arg) {
                 }
             }
             gPortMenuMode = 1; /* the renderer treats all 2D as one centred 4:3 page while the menus run */
+            gPortInMenus = 1;
             r = __real_Progress_Main(arg);
             gPortMenuMode = 0;
+            gPortInMenus = 0;
             sFromMenu = 1; /* a battle set up by the real menus follows: the traces apply to it too */
             return r;
         }
@@ -413,7 +427,13 @@ void Port_Trace(unsigned vblanks) {
                     }
 #if !defined(_WIN32) && !defined(__APPLE__) /* the linker symbols of an ELF program */
                     {   /* the game's global variables too: [__data_start, _end), base address first */
+#ifdef __SWITCH__ /* (libnx's linker script names the end __end__; the low 4 bytes of an address in the window are the
+                    game address, as on Linux the whole of it) */
+                        extern char __data_start[], __end__[];
+                        char *const _end = __end__;
+#else
                         extern char __data_start[], _end[];
+#endif
                         uint32_t base = (uint32_t)(uintptr_t)__data_start;
 
                         snprintf(name, sizeof(name), "port/build/glob_%u.bin", now);

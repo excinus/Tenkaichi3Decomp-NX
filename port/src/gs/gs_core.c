@@ -55,6 +55,7 @@ static unsigned sPix[5]; /* per frame: outside scissor, failed alpha test, faile
 static int sDrawFrom;       /* BT3_GS_FROM=<frame>: draw only from this frame on (the reference is slow) */
 static int sProbeX = -1, sProbeY = -1;
 static int sDumpFrame = -1; /* BT3_GS_DUMP=<frame>: list that frame's primitives */
+static int sDumpHud; /* BT3_GS_DUMP=hud: the frame 300 after the first of a fight's HUD (its first side marker) */
 static unsigned sStat[8]; /* per frame: DMA tags, VIF codes, DIRECT quadwords, GIF tags, register writes, vertices, image quadwords, unknown VIF */
 
 /* ---- GS local memory: 4 MB. A buffer pointer counts 256-byte blocks, a buffer width counts 64 pixels. Where a
@@ -159,6 +160,25 @@ static uint32_t vram_rw(uint32_t bp, uint32_t bw, uint32_t psm, uint32_t x, uint
         case 0x24: if (write) { *w = (*w & 0xF0FFFFFFu) | (v & 15) << 24; return 0; } return (*w >> 24) & 15;
         case 0x2C: if (write) { *w = (*w & 0x0FFFFFFFu) | (v & 15) << 28; return 0; } return *w >> 28;
         default: if (write) { *w = v; return 0; } return *w;
+        }
+    }
+}
+
+/* A 32-bit buffer's w x h pixels (w and h multiples of 8), rows top first, with alpha set to 0xFF: as Gs_VramRead
+   pixel by pixel, a block of 8 x 8 at a time. (A movie picture's copy at the end of the frame, 512 x 448: pixel by
+   pixel it was 44% of the render thread's time while the intro movie played on the Switch.) */
+void Gs_FrameRead32(uint32_t bp, uint32_t bw, uint32_t w, uint32_t h, uint32_t *out) {
+    uint32_t x, y, xx, yy;
+
+    for (y = 0; y < h; y += 8) {
+        for (x = 0; x < w; x += 8) {
+            const uint32_t *blk = (const uint32_t *)Gs_BlockPtr(bp, bw, 0, x, y);
+            for (yy = 0; yy < 8; yy++) {
+                uint32_t *row = out + (y + yy) * w + x;
+                for (xx = 0; xx < 8; xx++) {
+                    row[xx] = blk[kCol32[yy][xx]] | 0xFF000000u;
+                }
+            }
         }
     }
 }
@@ -908,7 +928,16 @@ static void reg_write(uint32_t addr, uint64_t d) {
     case 0x51: gs.trxpos = d; break;
     case 0x52: gs.trxreg = d; break;
     case 0x53: gs.trxdir = d; transfer_begin(); break;
-    case 0x7F: if (sGpu) { GsGpu_Native((int)d); } break; /* not a GS register: the port's marker (gs_marker.c) */
+    case 0x7F: /* not a GS register: the port's marker (gs_marker.c) */
+        if (sDumpHud && sDumpFrame < 0 && d >= 0x10 && d <= 0x12) {
+            sDumpFrame = (int)sFrame + 300;
+            fprintf(stderr, "gs: the HUD's first marker in frame %u: frame %d is listed\n", sFrame, sDumpFrame);
+        }
+        if (sDumpFrame == (int)sFrame) {
+            fprintf(stderr, "  marker %02x\n", (unsigned)d);
+        }
+        if (sGpu) { GsGpu_Native((int)d); }
+        break;
     default: break;
     }
 }
@@ -1174,6 +1203,16 @@ static int sThreaded;
 static int sJob;            /* 0 none, 1 start the GPU back end, 2 run a list */
 static uint32_t sJobTadr;
 static int sJobTte, sInitResult;
+static uint32_t sJobQwc; /* job 4, a GIF channel transfer: its size (Port_GsGifChannel) */
+static int sJobFbp;      /* the game's shown buffer when the job was handed over (gs_sony.c, gGsMainFbpGame) */
+extern int gGsMainFbp, gGsMainFbpGame;
+extern uint64_t gGpuEndNs; /* gs_draw.c */
+/* BT3_GS_VERBOSE: the game's thread waiting for the render thread (the GIF channel's transfers, the end of a tick
+   before its list is handed over, anything else), and the render thread's own time per list, drawn or skipped. */
+static uint64_t sWaitNs[4], sListNs[2], sListEndNs[2];
+static unsigned sWaitCount[4], sGifCount, sListCount[2];
+static uint64_t now_ns(void);
+static void gif_channel(uint32_t addr, uint32_t qwc, int chain);
 static int sStopping; /* the program is ending: the render thread leaves its loop (render_stop) */
 static int sListDone; /* the list being run has been drawn and its first picture shown (Smooth motion's others may follow) */
 static void run_chain(uint32_t tadr, int tte);
@@ -1242,7 +1281,16 @@ static void race_compare(void) {
 
 static void *render_thread(void *arg) {
     extern void PortInput_Pump(void); /* gs_input.c */
+    extern int GsGl_Split(void);      /* gs_gl.c: the GL thread pumps the window's events then */
     (void)arg;
+#ifdef __SWITCH__
+    {   /* a core of its own: the game's thread is on core 0, the sound's on core 2 (plat_nxfs.c) */
+        extern void Port_NxThreadCore(int core);
+        extern void Port_ProfileThread(void); /* plat_mem.c: sampled as the game's thread is */
+        Port_NxThreadCore(1);
+        Port_ProfileThread();
+    }
+#endif
     pthread_mutex_lock(&sLock);
     for (;;) {
         while (sJob == 0 && !sStopping) {
@@ -1254,7 +1302,7 @@ static void *render_thread(void *arg) {
                 until.tv_nsec -= 1000000000;
                 until.tv_sec++;
             }
-            if (pthread_cond_timedwait(&sWake, &sLock, &until) != 0 && sJob == 0 && !sStopping && sGpu) {
+            if (pthread_cond_timedwait(&sWake, &sLock, &until) != 0 && sJob == 0 && !sStopping && sGpu && !GsGl_Split()) {
                 pthread_mutex_unlock(&sLock);
                 PortInput_Pump();
                 pthread_mutex_lock(&sLock);
@@ -1264,18 +1312,36 @@ static void *render_thread(void *arg) {
             pthread_mutex_unlock(&sLock);
             return NULL;
         }
+        gGsMainFbp = sJobFbp; /* the buffer as the game had set it for this job, not as it is by now */
         if (sJob == 1) {
             sInitResult = GsGpu_Init();
+#ifdef __SWITCH__
+            if (GsGl_Split()) { /* the GL thread took core 1: this thread's walk of the lists goes beside the sound, on 2 */
+                extern void Port_NxThreadCore(int core);
+                Port_NxThreadCore(getenv("BT3_RENDER_CORE") != NULL ? atoi(getenv("BT3_RENDER_CORE")) : 2);
+            }
+#endif
+        } else if (sJob == 3) {
+            extern int GsGpu_Snapshot(uint32_t fbp); /* gs_draw.c */
+            sInitResult = GsGpu_Snapshot(sJobTadr); /* (Gs_StoreImage: the frame kept for the cross-fade) */
+        } else if (sJob == 4) {
+            gif_channel(sJobTadr, sJobQwc, sJobTte); /* (Port_GsGifChannel, OpenGL on this thread) */
         } else {
             uint32_t tadr = sJobTadr;
             int tte = sJobTte;
+            int skipped = gsSkipFrame != 0; /* (decided at the end of the list before) */
+            uint64_t t0 = now_ns(), end0;
             pthread_mutex_unlock(&sLock);
             {
                 extern void GsGpu_InterpHurry(int on);
                 GsGpu_InterpHurry(0);
             }
+            end0 = gGpuEndNs;
             run_frozen();
             pthread_mutex_lock(&sLock);
+            sListNs[skipped] += now_ns() - t0;
+            sListEndNs[skipped] += gGpuEndNs >= end0 ? gGpuEndNs - end0 : gGpuEndNs;
+            sListCount[skipped]++;
             sListDone = 1;
             pthread_cond_broadcast(&sDone);
             pthread_mutex_unlock(&sLock);
@@ -1297,20 +1363,38 @@ static void *render_thread(void *arg) {
     return NULL;
 }
 
-/* Blocks until the render thread has nothing to do. */
-static void render_wait(void) {
+/* Blocks until the render thread has nothing to do. `site`: which wait it is (sWaitNs). */
+static void render_wait_at(int site) {
+    extern int GsGl_OnThread(void); /* gs_gl.c */
+    uint64_t t0 = 0;
+    if (GsGl_OnThread()) {
+        return; /* (the GL thread does the render thread's OpenGL work: waiting for it there would never end) */
+    }
     pthread_mutex_lock(&sLock);
+    if (sJob != 0) {
+        t0 = now_ns();
+    }
     while (sJob != 0) {
         pthread_cond_wait(&sDone, &sLock);
     }
+    if (t0 != 0) {
+        sWaitNs[site] += now_ns() - t0;
+        sWaitCount[site]++;
+    }
     pthread_mutex_unlock(&sLock);
+}
+
+static void render_wait(void) {
+    render_wait_at(2);
 }
 
 /* At the program's end (atexit), from the game's thread: the list being drawn is finished, then the thread leaves
    its loop and is waited for, so that nothing it uses (the window, the device) is taken down under it. From the
    render thread itself (Esc in the window, the settings window's Quit) there is nothing to wait for. */
 static void render_stop(void) {
-    if (!sThreaded || pthread_equal(pthread_self(), sThread)) {
+    extern int GsGl_OnThread(void);
+    extern void GsGl_Stop(void);
+    if (!sThreaded || pthread_equal(pthread_self(), sThread) || GsGl_OnThread()) {
         return;
     }
     render_wait();
@@ -1319,6 +1403,7 @@ static void render_stop(void) {
     pthread_cond_broadcast(&sWake);
     pthread_mutex_unlock(&sLock);
     pthread_join(sThread, NULL);
+    GsGl_Stop(); /* (then the GL thread: the window and the context are its own) */
 }
 
 /* For the pad read (plat_stub.c), when the game has time to spare: returns once the list handed over last has been
@@ -1327,12 +1412,22 @@ static void render_stop(void) {
    older by the drawing's time when its picture came (2.4 ms measured at 2x). A game that is behind does not wait
    here: then the drawing beside the game's work is what the thread is for. */
 void Gs_RenderListWait(void) {
-    if (!sThreaded || pthread_equal(pthread_self(), sThread)) {
-        return;
+    extern int GsDraw_SkippedRecently(void); /* gs_draw.c */
+    uint64_t t0 = 0;
+    extern int GsGl_OnThread(void);
+    if (!sThreaded || pthread_equal(pthread_self(), sThread) || GsGl_OnThread() || GsDraw_SkippedRecently()) {
+        return; /* (ticks being left out: the drawing beside the game's work is needed, see GsDraw_SkippedRecently) */
     }
     pthread_mutex_lock(&sLock);
+    if (sJob == 2 && !sListDone) {
+        t0 = now_ns();
+    }
     while (sJob == 2 && !sListDone) {
         pthread_cond_wait(&sDone, &sLock);
+    }
+    if (t0 != 0) {
+        sWaitNs[3] += now_ns() - t0;
+        sWaitCount[3]++;
     }
     pthread_mutex_unlock(&sLock);
 }
@@ -1359,6 +1454,7 @@ static void render_post(int job, uint32_t tadr, int tte) {
     sListDone = 0;
     sJobTadr = tadr;
     sJobTte = tte;
+    sJobFbp = gGsMainFbpGame;
     pthread_cond_signal(&sWake);
     pthread_mutex_unlock(&sLock);
 }
@@ -1419,6 +1515,13 @@ static int render_thread_wanted(void) {
 #ifdef __APPLE__
     want = 0;
 #endif
+#ifdef __SWITCH__
+    /* The Switch: always (BT3_GS_THREAD=0 to compare). A fight there was 9 ms of the game and 25 of the list and
+       OpenGL's driver (measured on a console, 2026-10-30): one after the other they missed the 33 ms of a frame,
+       side by side on two cores they fit. (No setting: the settings window has no Video choice for it there.) */
+    (void)SDL_GetNumLogicalCPUCores;
+    return e != NULL ? atoi(e) != 0 : 1;
+#endif
     if (want && e == NULL && (Port_Setting("gpu_api", 0) == 1 || SDL_GetNumLogicalCPUCores() <= 2)) {
         want = 0;
     }
@@ -1433,7 +1536,8 @@ static int gs_on(void) {
         tables_init();
         gs.prmodecont = 1; /* the GS starts with the attributes in PRIM */
         sDrawFrom = getenv("BT3_GS_FROM") != NULL ? atoi(getenv("BT3_GS_FROM")) : 0;
-        sDumpFrame = getenv("BT3_GS_DUMP") != NULL ? atoi(getenv("BT3_GS_DUMP")) : -1;
+        sDumpHud = getenv("BT3_GS_DUMP") != NULL && strcmp(getenv("BT3_GS_DUMP"), "hud") == 0;
+        sDumpFrame = getenv("BT3_GS_DUMP") != NULL && !sDumpHud ? atoi(getenv("BT3_GS_DUMP")) : -1;
         if (getenv("BT3_GS_PROBE") != NULL) {
             sscanf(getenv("BT3_GS_PROBE"), "%d,%d", &sProbeX, &sProbeY);
         }
@@ -1441,17 +1545,31 @@ static int gs_on(void) {
             /* The render thread (setting "render_thread", F1 > Video; BT3_GS_THREAD=0/1 over it): the back end, the
                window and the list run on a thread of their own while the game computes the next tick. Not with
                OpenGL (its context is one thread's, and the game's thread asks the back end for a few things), not
-               on macOS (a window there is the main thread's), not with two logical processors or fewer. */
+               on macOS (a window there is the main thread's), not with two logical processors or fewer. On the
+               Switch always, with OpenGL (render_thread_wanted). */
             sThreaded = render_thread_wanted();
             if (sThreaded) {
+#ifdef __SWITCH__
+                /* (libnx's threads get a small stack by default; this one runs Mesa's shader compiler too) */
+                pthread_attr_t attr;
+                pthread_attr_init(&attr);
+                pthread_attr_setstacksize(&attr, 8u << 20);
+                pthread_create(&sThread, &attr, render_thread, NULL);
+                pthread_attr_destroy(&attr);
+#else
                 pthread_create(&sThread, NULL, render_thread, NULL);
+#endif
                 render_post(1, 0, 0);
                 render_wait();
                 sGpu = sInitResult;
                 atexit(render_stop);
+#ifdef __SWITCH__
+                fprintf(stderr, "bt3: render thread: the list and OpenGL on a core of their own\n");
+#else
                 if (sGpu && GsGpu_BackendIsGl()) {
                     fprintf(stderr, "bt3: render thread: the Vulkan renderer did not start; OpenGL on the thread (the game's own reads of the picture are left out)\n");
                 }
+#endif
             } else {
                 sGpu = GsGpu_Init();
             }
@@ -1463,14 +1581,29 @@ static int gs_on(void) {
 /* A transfer on the GIF channel itself (the game uses it for texture uploads outside the frame's list):
    `qwc` quadwords of GIF data at `addr`, or with chain = 1 a source chain of them starting at `addr`. */
 void Port_GsGifChannel(uint32_t addr, uint32_t qwc, int chain) {
-    int guard;
-
     if (!gs_on()) {
         return;
     }
     if (sThreaded) {
-        render_wait(); /* the GS is one device: this transfer goes after the list that is being drawn */
+        sGifCount++;
+        render_wait_at(0); /* the GS is one device: this transfer goes after the list that is being drawn */
+        if (sGpu && GsGpu_BackendIsGl() && !pthread_equal(pthread_self(), sThread)) {
+            /* OpenGL on the render thread: its context is that thread's, and a transfer can draw (the game clears
+               its frame buffers this way) and make targets. Carried out there, the game's thread waiting. (On the
+               Switch, done here: the targets made without a context, nothing was ever shown.) */
+            sJobQwc = qwc;
+            render_post(4, addr, chain);
+            render_wait_at(0);
+            return;
+        }
+        gGsMainFbp = gGsMainFbpGame; /* (the thread is idle: the transfer is carried out here) */
     }
+    gif_channel(addr, qwc, chain);
+}
+
+static void gif_channel(uint32_t addr, uint32_t qwc, int chain) {
+    int guard;
+
     if (!chain) {
         Gs_Gif((const uint8_t *)Port_Ptr(addr), qwc);
         return;
@@ -1509,7 +1642,7 @@ void Port_GsVif1Chain(uint32_t tadr, int tte) {
     if (sThreaded) {
         extern void GsGpu_InterpHurry(int on); /* gs_draw.c: the next list is here: the tick's real picture at once */
         GsGpu_InterpHurry(1);
-        render_wait(); /* the previous list must be finished before this one starts (the PS2's sceGsSyncPath) */
+        render_wait_at(1); /* the previous list must be finished before this one starts (the PS2's sceGsSyncPath) */
     } else {
         run_chain(tadr, tte);
     }
@@ -1524,7 +1657,7 @@ void Port_GsVif1Chain(uint32_t tadr, int tte) {
                100 ms or more always, without BT3_GS_VERBOSE: the other player's copy waits for this one meanwhile;
                the time this copy itself waited for the other player is said apart, gs/net.c) */
             extern unsigned gGpuNewTex, gGpuNewTexPixels, gGpuNewPipes;
-            extern uint64_t gGpuTexNs, gGpuPipeNs, gGpuEndNs, gPortNetWaitNs;
+            extern uint64_t gGpuTexNs, gGpuPipeNs, gGpuEndNs, gPortNetWaitNs, gGpuArtNs, gGpuCheckNs, gGpuTextNs;
             extern int Port_NetActive(void);
             uint64_t netWait = gPortNetWaitNs;
             gPortNetWaitNs = 0;
@@ -1533,8 +1666,16 @@ void Port_GsVif1Chain(uint32_t tadr, int tte) {
                                 "%u new textures (%u pixels), %u new pipelines\n",
                         sFrame, (double)work / 1e6, (double)(tChain - start) / 1e6, (double)netWait / 1e6, (double)(t - tChain) / 1e6, gGpuNewTex,
                         gGpuNewTexPixels, gGpuNewPipes);
-                fprintf(stderr, "slow:   of the display list time: texture decoding %.1f ms, pipeline creation %.1f ms, submitting the frame %.1f ms\n",
-                        (double)gGpuTexNs / 1e6, (double)gGpuPipeNs / 1e6, (double)gGpuEndNs / 1e6);
+                {
+                    extern unsigned long long gPortFileNs, gPortFileOpenNs, gPortFileBytes;
+                    extern unsigned gPortFileReads, gPortFileOpens;
+                    fprintf(stderr, "slow:   of the game's time: the game's file reads %.1f ms (%u, %llu KB), file opens %.1f ms (%u)\n",
+                            (double)gPortFileNs / 1e6, gPortFileReads, gPortFileBytes >> 10, (double)gPortFileOpenNs / 1e6, gPortFileOpens);
+                }
+                fprintf(stderr, "slow:   of the display list time: texture decoding %.1f ms (of it European menu art %.1f, battle text checks "
+                                "%.1f, menu text %.1f), pipeline creation %.1f ms, submitting the frame %.1f ms\n",
+                        (double)gGpuTexNs / 1e6, (double)gGpuArtNs / 1e6, (double)gGpuCheckNs / 1e6, (double)gGpuTextNs / 1e6,
+                        (double)gGpuPipeNs / 1e6, (double)gGpuEndNs / 1e6);
             }
             /* per second: where the work goes (the game's own code, walking the list, and of that the GPU side) */
             sumGame += tChain - start > waited ? tChain - start - waited : 0;
@@ -1543,7 +1684,13 @@ void Port_GsVif1Chain(uint32_t tadr, int tte) {
             sumPipe += gGpuPipeNs;
             sumEnd += gGpuEndNs;
             gGpuNewTex = gGpuNewTexPixels = gGpuNewPipes = 0;
-            gGpuTexNs = gGpuPipeNs = gGpuEndNs = 0;
+            gGpuTexNs = gGpuPipeNs = gGpuEndNs = gGpuArtNs = gGpuCheckNs = gGpuTextNs = 0;
+            {
+                extern unsigned long long gPortFileNs, gPortFileOpenNs, gPortFileBytes;
+                extern unsigned gPortFileReads, gPortFileOpens;
+                gPortFileNs = gPortFileOpenNs = gPortFileBytes = 0;
+                gPortFileReads = gPortFileOpens = 0;
+            }
         }
         if (getenv("BT3_BURN_MS") != NULL) { /* testing: a slower machine, by burning time in every frame */
             uint64_t until = now_ns() + (uint64_t)atoi(getenv("BT3_BURN_MS")) * 1000000ull;
@@ -1563,6 +1710,23 @@ void Port_GsVif1Chain(uint32_t tadr, int tte) {
             }
             if (getenv("BT3_GS_VERBOSE") != NULL) {
                 fprintf(stderr, "time:   frames lasted %.1f to %.1f ms (33.4 in a fight, 16.7 in the menus)\n", (double)perMin / 1e6, (double)perMax / 1e6);
+            }
+            if (getenv("BT3_GS_VERBOSE") != NULL && sThreaded) {
+                pthread_mutex_lock(&sLock);
+                fprintf(stderr, "time:   the game's thread waited for the render thread: %.1f ms per frame in %u of %u GIF channel transfers, "
+                                "%.1f at %u of 60 frames' ends, %.1f before reading the pads (%u), %.1f elsewhere (%u); the render thread: %u lists drawn, %.1f ms each "
+                                "(of it ending the frame %.1f), %u skipped, %.1f ms each\n",
+                        (double)sWaitNs[0] / 60e6, sWaitCount[0], sGifCount, (double)sWaitNs[1] / 60e6, sWaitCount[1], (double)sWaitNs[3] / 60e6, sWaitCount[3], (double)sWaitNs[2] / 60e6,
+                        sWaitCount[2], sListCount[0], sListCount[0] ? (double)sListNs[0] / sListCount[0] / 1e6 : 0.0,
+                        sListCount[0] ? (double)sListEndNs[0] / sListCount[0] / 1e6 : 0.0, sListCount[1],
+                        sListCount[1] ? (double)sListNs[1] / sListCount[1] / 1e6 : 0.0);
+                memset(sWaitNs, 0, sizeof(sWaitNs));
+                memset(sWaitCount, 0, sizeof(sWaitCount));
+                memset(sListNs, 0, sizeof(sListNs));
+                memset(sListEndNs, 0, sizeof(sListEndNs));
+                memset(sListCount, 0, sizeof(sListCount));
+                sGifCount = 0;
+                pthread_mutex_unlock(&sLock);
             }
             n = 0; sum = 0; worst = 0; over = 0;
             sumGame = sumList = sumTex = sumPipe = sumEnd = 0;
@@ -1648,9 +1812,23 @@ static void walk_chain(uint32_t tadr, int tte, void (*block)(const uint32_t *tag
 
     for (guard = 0; guard < 100000; guard++) {
         const uint32_t *tag = (const uint32_t *)Port_Ptr(tadr);
-        uint32_t qwc = tag[0] & 0xFFFF, id = (tag[0] >> 28) & 7, addr = tag[1]; /* a game address: all 32 bits */
+        uint32_t qwc, id, addr; /* (addr: a game address, all 32 bits) */
         const uint32_t *data;
         int end = 0;
+
+        if (tag == NULL) { /* (a chain led to address 0: see below) */
+            /* The rest of the list is lost. Said once: a fight's effects, HUD and pause menu were missing on the
+               Switch because a tag's id had become NEXT (address 0) where it was RET (the window pass, macwin.cpp). */
+            static int told;
+            if (!told) {
+                told = 1;
+                fprintf(stderr, "bt3: gs: frame %u: the list leads to address 0 (depth %u): the rest of it is left out\n", sFrame, sp);
+            }
+            break;
+        }
+        qwc = tag[0] & 0xFFFF;
+        id = (tag[0] >> 28) & 7;
+        addr = tag[1];
 
         switch (id) {
         case 0: data = (const uint32_t *)Port_Ptr(addr); end = 1; break;                 /* REFE */
@@ -1664,7 +1842,20 @@ static void walk_chain(uint32_t tadr, int tte, void (*block)(const uint32_t *tag
         if (sDumpFrame == (int)sFrame) {
             fprintf(stderr, "  dma tag at %08x: id %u qwc %u addr %08x | %08x %08x (depth %u)\n", (unsigned)Port_Addr(tag), id, qwc, addr, tag[2], tag[3], sp);
         }
-        block(tag, data, qwc, tte);
+        if (data == NULL && qwc != 0) {
+            /* A block of data at address 0 (REF / REFS / REFE with address 0). The PlayStation 2 would read its first
+               kilobytes there; here address 0 is not the game's memory (a game address is an offset in the window,
+               and 0 is NULL): left out, said once. Seen on the Switch at the start of a fight (a crash in vif()
+               before this, 2026-10-29). */
+            static int told;
+            if (!told) {
+                told = 1;
+                fprintf(stderr, "bt3: gs: frame %u: a DMA tag at %08x (id %u, %u quadwords) refers to address 0: left out\n", sFrame,
+                        (unsigned)Port_Addr(tag), id, qwc);
+            }
+        } else {
+            block(tag, data, qwc, tte);
+        }
         if (end) {
             break;
         }
@@ -1729,25 +1920,36 @@ void Gs_StoreImage(unsigned bp, unsigned w, unsigned h, unsigned char *rgb) {
         fprintf(stderr, "gs: frame %u: the game reads %ux%u back from buffer %#x, row %u\n", sFrame, w, h, fbp, y0);
     }
     if (sGpu) {
-        if (Gs_RenderThreaded() && GsGpu_BackendIsGl()) {
-            return; /* (OpenGL on the render thread: its context is that thread's; the game gets black, as before) */
-        }
+        /* OpenGL on the render thread: its context is that thread's. The snapshot is taken there; the picture is
+           not read back (the game gets black, as before). */
+        int glThread = Gs_RenderThreaded() && GsGpu_BackendIsGl();
         Gs_RenderIdle(); /* (the back end is the render thread's while it runs a list) */
         {
             /* First choice: the frame stays on the card as it was drawn and the cross-fade draws from that (the
                game is handed black, which it uploads and never shows). BT3_XFADE_READ=1: the game's own way. */
             extern int GsGpu_Snapshot(uint32_t fbp);
             static unsigned snapFrame = ~0u, snapFbp = ~0u;
-            if (getenv("BT3_XFADE_READ") == NULL) {
+            if (getenv("BT3_XFADE_READ") == NULL || glThread) {
+                int took;
                 if (snapFrame == sFrame && snapFbp == fbp) {
                     return;
                 }
-                if (GsGpu_Snapshot(fbp)) {
+                if (glThread && !Gs_OnRenderThread()) {
+                    render_post(3, fbp, 0);
+                    render_wait();
+                    took = sInitResult;
+                } else {
+                    took = GsGpu_Snapshot(fbp);
+                }
+                if (took) {
                     snapFrame = sFrame;
                     snapFbp = fbp;
                     return;
                 }
             }
+        }
+        if (glThread) {
+            return;
         }
         if (keptFrame != sFrame || keptFbp != fbp) {
             if (!GsGpu_ReadFrame(fbp, kept)) {

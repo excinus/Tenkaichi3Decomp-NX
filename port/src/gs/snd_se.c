@@ -29,6 +29,16 @@
  * ear (SE_GAIN) until it is compared with the console.
  */
 #include <SDL3/SDL.h>
+
+/* (the stream's lock, which the sound thread holds while it mixes; plat_stub.c's gPortWhere says so while it is
+   waited for) */
+extern const char *volatile gPortWhere;
+static void lock_stream(SDL_AudioStream *s) {
+    const char *was = gPortWhere;
+    gPortWhere = "the sound: waiting for a stream's lock";
+    SDL_LockAudioStream(s);
+    gPortWhere = was;
+}
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -298,7 +308,7 @@ void PortSe_RunAgainEnds(unsigned first, unsigned live) {
     if (live - first > HEARD_BLANKS) {
         first = live - HEARD_BLANKS;
     }
-    if (sStream != NULL) { SDL_LockAudioStream(sStream); }
+    if (sStream != NULL) { lock_stream(sStream); }
     for (t = first; t != live; t++) {
 #define H sHeard[t % HEARD_BLANKS]
         if (H.tick != t) {
@@ -594,7 +604,7 @@ int func_002967C0(int block, int cmd, int core, int mode, void *iopAddr, uint32_
     (void)block; (void)core; (void)mode;
     if (cmd == 0x80D0) {
         if (iopAddr != NULL && spuAddr < SPU_SIZE && size <= SPU_SIZE - spuAddr) {
-            if (sStream != NULL) { SDL_LockAudioStream(sStream); }
+            if (sStream != NULL) { lock_stream(sStream); }
             memcpy(&sSpu[spuAddr], iopAddr, size);
             if (sStream != NULL) { SDL_UnlockAudioStream(sStream); }
         }
@@ -612,7 +622,7 @@ int sceSifCallRpc(void *client, int fno, int mode, void *send, int sendSize, voi
     if (recv != NULL && recvSize >= 4) {
         memset(recv, 0, 4); /* the result word */
     }
-    if (sStream != NULL) { SDL_LockAudioStream(sStream); }
+    if (sStream != NULL) { lock_stream(sStream); }
     switch (fno) {
     case 0x0: /* INIT */
     case 0x2: /* RESET */

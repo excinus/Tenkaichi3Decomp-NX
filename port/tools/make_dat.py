@@ -66,8 +66,8 @@ def main():
     placed = mac_placed(exe) if toolchain.MAC else {}
     for l in open(str(exe) + ".map") if not toolchain.MAC else ():
         m = re.match(r"^\s*\.data\s+0x([0-9a-f]+)\s+0x([0-9a-f]+)\s+\S*obj_data\w*/(\S+)\.o\s*$", l)
-        if m and int(m.group(2), 16):
-            placed[m.group(3)] = (int(m.group(1), 16), int(m.group(2), 16))
+        if m and int(m.group(2), 16):  # (the Switch: in the window, game addresses are offsets from it)
+            placed[m.group(3)] = (int(m.group(1), 16) - (toolchain.NX_WINDOW if toolchain.NX else 0), int(m.group(2), 16))
     records = []
     for name in sorted(where):
         if name not in placed:
@@ -90,12 +90,12 @@ def main():
             raise SystemExit(f"{name}: {off} bytes in port/data, {size} in the program")
     # the mark that this program does not work without its list (gPortDataStripped, plat_mem.c)
     secs = mac_sections(exe) if toolchain.MAC else []
-    lines = [] if toolchain.MAC else subprocess.run([PREFIX + "objdump", "-h", str(exe)], capture_output=True, text=True).stdout.splitlines()
+    lines = [] if toolchain.MAC else subprocess.run([toolchain.dkp("objdump") if toolchain.NX else PREFIX + "objdump", "-h", str(exe)], capture_output=True, text=True).stdout.splitlines()
     for k, l in enumerate(lines):
         m = re.match(r"\s*\d+\s+(\S+)\s+([0-9a-f]+)\s+([0-9a-f]+)\s+([0-9a-f]+)\s+([0-9a-f]+)", l)
         if m and k + 1 < len(lines) and "CONTENTS" in lines[k + 1]:
             secs.append((int(m.group(3), 16), int(m.group(5), 16), int(m.group(2), 16)))
-    flag = next((int(l.split()[0], 16) for l in subprocess.run([toolchain.llvm("llvm-nm") if toolchain.MAC else PREFIX + "nm", str(exe)],
+    flag = next((int(l.split()[0], 16) for l in subprocess.run([toolchain.llvm("llvm-nm") if toolchain.WINDOW else PREFIX + "nm", str(exe)],
                                                               capture_output=True, text=True).stdout.splitlines()
                  if l.endswith(" _gPortDataStripped" if toolchain.MAC else " gPortDataStripped")), None)
     off = next((o + flag - va for va, o, size in secs if flag is not None and va <= flag < va + size), None)

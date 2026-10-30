@@ -3,6 +3,10 @@
 #include "menu/menu_y.h"
 #include "sys/pad.h"
 #include "sys/save.h"
+#ifdef PORT
+extern void Port_MenuPage(int screen); /* port/src/gs_marker.c: widescreen menus */
+extern void Port_MenuFill(int on);
+#endif
 
 Option *gOption = NULL; /* 0x3BC364 */
 
@@ -37,6 +41,12 @@ s32 Option_Init(s32 section) {
     memset(gOption, 0, sizeof(Option));
     gOption->pack = (u32 *)MPACK_AT(gMenuArc10, section);
     gOption->res = Sprite_Unpack(gOption->pack, NULL, NULL);
+#if defined(PORT) && defined(__SWITCH__)
+    { /* the controller page's picture: a pair of Joy-Con, not a DualShock 2 (port/src/plat_nxart.c) */
+        extern void Port_NxOptionArt(void *res, u32 size);
+        Port_NxOptionArt(gOption->res, gOption->pack[0]); /* (the pack's first word: its size unpacked) */
+    }
+#endif
     /*
      * The rest of the function sits in a block that the compiler sees as a loop (`do { } while (0)`, most likely
      * from a macro), and the counter of the loop at the end is cleared here, not in its `for`: the original
@@ -1329,7 +1339,14 @@ void Option_Draw(void) {
     f32 len;
 
     flash = gOption->flash;
+#ifdef PORT
+    Port_MenuPage(39); /* widescreen menus: this screen's page, its backdrop filling the width */
+    Port_MenuFill(1);
     Sprite_DrawPicture(gOption->bg, 0, 0, 0x80);
+    Port_MenuFill(0);
+#else
+    Sprite_DrawPicture(gOption->bg, 0, 0, 0x80);
+#endif
     Flash_Advance(gOption->flash);
     Flash_FindLabel(flash, NULL, "mc_dende_eye", &eye);
     Flash_FindLabel(flash, NULL, "mc_dende_mouth", &mouth);
@@ -1959,6 +1976,9 @@ void Option_Draw(void) {
     } else {
         Dialog_Draw(1);
     }
+#ifdef PORT
+    Port_MenuPage(0);
+#endif
 }
 
 /* Sends one of the screen's plates to a label of its timeline. */

@@ -19,6 +19,16 @@
  * runs (replay validation) must not depend on a sound device.
  */
 #include <SDL3/SDL.h>
+
+/* (the stream's lock, which the sound thread holds while it mixes; plat_stub.c's gPortWhere says so while it is
+   waited for) */
+extern const char *volatile gPortWhere;
+static void lock_stream(SDL_AudioStream *s) {
+    const char *was = gPortWhere;
+    gPortWhere = "the sound: waiting for a stream's lock";
+    SDL_LockAudioStream(s);
+    gPortWhere = was;
+}
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -684,7 +694,7 @@ void ADXT_Pause(void *adxt, int sw) {
         PortMa_Pause(p->ma, p->paused);
     }
     else if (p->stream != NULL) {
-        SDL_LockAudioStream(p->stream);
+        lock_stream(p->stream);
         p->paused = sw != 0;
         if (p->paused) {
             SDL_ClearAudioStream(p->stream); /* what is queued would still be heard */
@@ -718,7 +728,7 @@ void ADXT_SetOutPan(void *adxt, int chan, int pan) {
     Player *p = adxt;
 
     if (p != NULL && chan >= 0 && chan < 2) {
-        if (p->stream != NULL) { SDL_LockAudioStream(p->stream); }
+        if (p->stream != NULL) { lock_stream(p->stream); }
         p->pan[chan] = pan;
         gPortAdxView[p - sPlayers].pan[chan] = pan;
         if (p->stream != NULL) { SDL_UnlockAudioStream(p->stream); }

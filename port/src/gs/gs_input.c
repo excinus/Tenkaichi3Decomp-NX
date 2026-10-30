@@ -83,7 +83,11 @@ static void defaults(int player) {
     }
     sDeadzone[player][0] = sDeadzone[player][1] = -1;
     sVib[player][0] = 1;
+#ifdef __SWITCH__
+    sVib[player][1] = 30; /* (the Joy-Cons' motors: 100% is too strong; plat_settings.c, default_here) */
+#else
     sVib[player][1] = 100;
+#endif
 }
 
 static int range(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
@@ -446,6 +450,8 @@ static struct { SDL_JoystickID id; SDL_Gamepad *pad; } sOpen[MAX_PADS];
 static SDL_JoystickID sIds[MAX_PADS];
 static int sIdCount, sInit;
 
+extern const char *volatile gPortWhere; /* plat_stub.c */
+
 static void pads_refresh(void) {
     static unsigned calls;
     SDL_JoystickID *ids;
@@ -598,6 +604,57 @@ void Port_ClashSquareSet(int on) {
     sClashSquare = on != 0;
     Port_SettingSave("clash_square", sClashSquare);
     Port_SettingsWrite();
+}
+
+/* The Nintendo layout in the menus (the Switch: setting menu_nintendo_ab, on by default). The game's menus choose with
+   Cross and go back with Triangle, which by position are the Switch's B and X. With this on, in the menus and in a
+   fight's own menus (the pause menu, the one after the fight: a11y_game.c Port_BattleMenuOpen), a controller's A
+   chooses and its B goes back: what the controller gives as Circle (A) is Cross, Cross (B) is Triangle, and Triangle
+   (X) is Circle. The fight itself is left as it is. A button held while the menus open or close stays out until it is
+   let go (the A that closed the pause menu would otherwise be a Circle in the fight). */
+static int sMenuAb = -1;
+
+int Port_MenuAbSwap(void) {
+    if (sMenuAb < 0) {
+#ifdef __SWITCH__
+        sMenuAb = Port_Setting("menu_nintendo_ab", 1) != 0; /* (on by default: the player's choice, 2026-10-30) */
+#else
+        sMenuAb = 0;
+#endif
+    }
+    return sMenuAb;
+}
+
+void Port_MenuAbSwapSet(int on) {
+    sMenuAb = on != 0;
+    Port_SettingSave("menu_nintendo_ab", sMenuAb);
+    Port_SettingsWrite();
+}
+
+static unsigned menu_ab(int socket, unsigned btn) {
+    extern int gPortInMenus;              /* headless.c */
+    extern int Port_BattleMenuOpen(void); /* a11y_game.c */
+    static int was[2];
+    static unsigned held[2];
+    const unsigned three = B_CROSS | B_CIRCLE | B_TRIANGLE;
+    int on = Port_MenuAbSwap() && (gPortInMenus || Port_BattleMenuOpen());
+    unsigned out = btn;
+
+    if (on != was[socket]) {
+        held[socket] = btn & three; /* (the buttons held as the layout changes: out until let go) */
+        was[socket] = on;
+    }
+    held[socket] &= btn;
+    if (on) {
+        out = btn & ~three;
+        out |= (btn & B_CIRCLE) ? B_CROSS : 0;
+        out |= (btn & B_CROSS) ? B_TRIANGLE : 0;
+        out |= (btn & B_TRIANGLE) ? B_CIRCLE : 0;
+        out &= ~((held[socket] & B_CIRCLE ? B_CROSS : 0u) | (held[socket] & B_CROSS ? B_TRIANGLE : 0u) | (held[socket] & B_TRIANGLE ? B_CIRCLE : 0u));
+    } else {
+        out &= ~held[socket];
+    }
+    return out;
 }
 
 static void clash_square(int socket, unsigned *btn, unsigned char *lx, unsigned char *ly) {
@@ -1016,6 +1073,7 @@ int Port_PadRead(int socket, unsigned char *data) {
     if (!GsGpu_Enabled() || socket < 0 || socket > 1) {
         return 0;
     }
+    gPortWhere = "reading the controllers";
     pthread_once(&sLoadOnce, load);
     pads_refresh();
     if (sSwallow) { /* the buttons that opened or closed the settings window are not the game's (START would pause) */
@@ -1039,14 +1097,29 @@ int Port_PadRead(int socket, unsigned char *data) {
     /* (the settings window is worked with the controller too while it is open: nothing of it for the game) */
     g = gPortInputCapture || gPortOverlayOpen || sSwallow ? NULL : pad_of(socket);
     if (g != NULL) {
+        unsigned pbtn = 0;
         for (a = 0; a < PORT_PAD_BUTTONS; a++) {
             int src = sPadBtn[socket][a];
             if (src == PORT_PAD_LT ? SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > PORT_TRIGGER_AT :
                 src == PORT_PAD_RT ? SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > PORT_TRIGGER_AT :
                 src >= 0 && SDL_GetGamepadButton(g, (SDL_GamepadButton)src)) {
-                btn |= kActions[a].bit;
+                pbtn |= kActions[a].bit;
             }
         }
+#ifdef __SWITCH__
+        {   /* A Joy-Con alone, held sideways, has no d-pad, and the game's menus are moved through with the d-pad only
+               (the characters' choice among them): there its stick is the d-pad as well (port/switch/sdl3's driver
+               names such a controller "..., sideways"). */
+            extern int gPortInMenus;              /* headless.c */
+            extern int Port_BattleMenuOpen(void); /* a11y_game.c */
+            const char *name = SDL_GetGamepadName(g);
+            if (name != NULL && strstr(name, "sideways") != NULL && (gPortInMenus || Port_BattleMenuOpen())) {
+                int x = SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFTX), y = SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFTY);
+                pbtn |= (x < -16384 ? B_LEFT : 0) | (x > 16384 ? B_RIGHT : 0) | (y < -16384 ? B_UP : 0) | (y > 16384 ? B_DOWN : 0);
+            }
+        }
+#endif
+        btn |= menu_ab(socket, pbtn); /* (the controller's buttons only, not the keyboard's) */
         stick_bytes(sDeadzone[socket][0], SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFTX), SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFTY), &lx, &ly);
         stick_bytes(sDeadzone[socket][1], SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_RIGHTX), SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_RIGHTY), &rx, &ry);
     }
@@ -1112,5 +1185,6 @@ int Port_PadRead(int socket, unsigned char *data) {
     data[0] = (unsigned char)(~btn & 0xFF);       /* active low */
     data[1] = (unsigned char)(~(btn >> 8) & 0xFF);
     data[2] = rx; data[3] = ry; data[4] = lx; data[5] = ly;
+    gPortWhere = "the game's code, after reading the controllers";
     return 18;
 }

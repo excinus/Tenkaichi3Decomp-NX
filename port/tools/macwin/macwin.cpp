@@ -1,4 +1,4 @@
-// The game's memory model on macOS / arm64, as an LLVM pass (opt -load-pass-plugin macwin.dylib -passes=bt3-window).
+// The game's memory model on macOS / arm64 (and the Switch, see -bt3-window-base), as an LLVM pass (opt -load-pass-plugin macwin.dylib -passes=bt3-window).
 //
 // The game's pointers are 4 bytes wide (port/tools/ptr32.py: `__ptr32 __uptr`, address space 271). On Linux and
 // Windows they are plain addresses below 4 GB. macOS keeps the low 4 GB of every arm64 process unmapped, so here a
@@ -74,6 +74,15 @@ cl::opt<bool> PortModule("bt3-port", cl::desc("a port source, not the game's"), 
 // likewise, and the call is a fixed-argument one when the definition is.
 cl::opt<std::string> Defs("bt3-defs", cl::desc("write this module's function definitions to FILE, change nothing"), cl::init(""));
 cl::opt<std::string> Sigs("bt3-sigs", cl::desc("the program's function definitions (FILE from -bt3-defs)"), cl::init(""));
+// The Switch build (BT3_CC=nx64, docs/port/switch_plan.md): ELF, where a constant in data cannot be the difference of
+// two symbols in different sections (Mach-O's subtractor relocations can). The program is linked at a window W0 =
+// this value (+ 0x20000000) and the launcher may load it into another 4 GB window, moving it as a whole. So:
+//   - in data (global initializers), W is the number W0: a 4-byte pointer is `.word g - W0`, a window offset, which
+//     is the same wherever the program is loaded (the program and its window move together);
+//   - in code, W is the program's own start less 0x20000000 (`__start__`, libnx's linker script), reached
+//     PC-relatively, as on macOS: nothing in the code depends on where the program is.
+// The 8-byte pointers in data are moved by the launcher (port/tools/nx_reloc.py lists them).
+cl::opt<uint64_t> WindowBase("bt3-window-base", cl::desc("W0 for data, ELF (default: W from _mh_execute_header everywhere)"), cl::init(0));
 
 constexpr unsigned GAME = 271; // __ptr32 __uptr: the game's 4-byte pointers
 constexpr unsigned HOST64 = 272; // __ptr64: ordinary 64-bit pointers (ptr32.py uses them for variadic arguments)
@@ -84,9 +93,10 @@ struct Window {
     LLVMContext &Ctx;
     Type *I64, *I32, *I8;
     PointerType *Host, *Game;
-    Constant *W = nullptr;
+    Constant *W = nullptr, *WData = nullptr;
+    bool InData = false; // fixing a global's initializer (-bt3-window-base: W is the number there)
     std::map<Function *, Value *> WIn; // per function: the base loaded from Port_Window
-    std::map<Constant *, Constant *> Done;
+    std::map<Constant *, Constant *> Done, DoneData;
     std::map<Constant *, Constant *> HostOf; // a 4-byte pointer constant made from a host address -> that address
     bool Failed = false;
 
@@ -94,11 +104,24 @@ struct Window {
         : M(M), Ctx(M.getContext()), I64(Type::getInt64Ty(Ctx)), I32(Type::getInt32Ty(Ctx)), I8(Type::getInt8Ty(Ctx)),
           Host(PointerType::get(Ctx, 0)), Game(PointerType::get(Ctx, GAME)) {}
 
+    // W for an offset (p - W): in data under -bt3-window-base the number W0, otherwise windowAt()
     Constant *window() {
+        if (InData && WindowBase != 0) {
+            if (!WData) {
+                WData = ConstantExpr::getIntToPtr(ConstantInt::get(I64, WindowBase), Host);
+            }
+            return WData;
+        }
+        return windowAt();
+    }
+    // W as the program's first byte less 0x20000000: for addresses made from W (W + offset), which move with the
+    // program, and for everything in code
+    Constant *windowAt() {
         if (!W) {
-            GlobalVariable *mh = M.getGlobalVariable("_mh_execute_header");
+            const char *start = WindowBase != 0 ? "__start__" : "_mh_execute_header"; // (the program's first byte)
+            GlobalVariable *mh = M.getGlobalVariable(start);
             if (!mh) {
-                mh = new GlobalVariable(M, I8, true, GlobalValue::ExternalLinkage, nullptr, "_mh_execute_header");
+                mh = new GlobalVariable(M, I8, true, GlobalValue::ExternalLinkage, nullptr, start);
                 mh->setVisibility(GlobalValue::HiddenVisibility);
                 mh->setDSOLocal(true);
             }
@@ -121,7 +144,7 @@ struct Window {
         if (known != HostOf.end()) { // W + (p - W): p itself
             return To->getAddressSpace() == 0 ? known->second : ConstantExpr::getAddrSpaceCast(known->second, To);
         }
-        Constant *p = ConstantExpr::getGetElementPtr(I8, window(), ConstantExpr::getPtrToInt(off, I64));
+        Constant *p = ConstantExpr::getGetElementPtr(I8, windowAt(), ConstantExpr::getPtrToInt(off, I64));
         return To->getAddressSpace() == 0 ? p : ConstantExpr::getAddrSpaceCast(p, To);
     }
     Constant *gameC(Constant *p) { // a host address constant as a 4-byte pointer
@@ -140,6 +163,7 @@ struct Window {
         if (isa<GlobalValue>(C) || isa<ConstantData>(C)) {
             return C;
         }
+        std::map<Constant *, Constant *> &Done = InData ? DoneData : this->Done;
         auto it = Done.find(C);
         if (it != Done.end()) {
             return it->second;
@@ -229,6 +253,26 @@ struct Window {
         Value *off = B.CreateIntToPtr(B.CreateSub(B.CreatePtrToInt(p, I64), B.CreatePtrToInt(window(), I64)), Game, "w.game");
         return !mayBeNull || knownNonNull(p) ? off : B.CreateSelect(B.CreateIsNull(p), ConstantPointerNull::get(Game), off);
     }
+    // A 64-bit ptrtoint of an ordinary pointer subtracted from (or from) a 4-byte pointer's.
+    bool inMixedDifference(PtrToIntInst *PI) {
+        for (User *U : PI->users()) {
+            auto *BO = dyn_cast<BinaryOperator>(U);
+            if (!BO || BO->getOpcode() != Instruction::Sub) {
+                continue;
+            }
+            Value *other = BO->getOperand(0) == PI ? BO->getOperand(1) : BO->getOperand(0);
+            auto *OP = dyn_cast<PtrToIntInst>(other);
+            if (OP && isGame(OP->getPointerOperand()->getType())) {
+                return true;
+            }
+            if (auto *CE = dyn_cast<ConstantExpr>(other)) {
+                if (CE->getOpcode() == Instruction::PtrToInt && isGame(CE->getOperand(0)->getType())) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
     Value *mem(Instruction *I, Value *ptr) { // a pointer used to reach memory: no null case to keep
         if (!isGame(ptr->getType())) {
             return ptr;
@@ -288,6 +332,28 @@ struct Window {
             } else if (auto *PI = dyn_cast<PtrToIntInst>(I)) {
                 if (!PortModule && PI->getPointerAddressSpace() == 0 && PI->getType()->getIntegerBitWidth() <= 32) {
                     PI->setOperand(0, game(B, PI->getOperand(0)));
+                } else if (!PortModule && PI->getPointerAddressSpace() == 0 && inMixedDifference(PI)) {
+                    // `p - q` of a 4-byte pointer and an ordinary one (a parameter: ptr32.py keeps those 64-bit):
+                    // clang subtracts their ptrtoint to 64 bits, an offset (zero-extended) and W + offset. The
+                    // ordinary one is taken as its game address too, as on Linux where the two are equal. (Was the
+                    // window's base in the difference: ObjShadow_BuildPacket's `(p - pkt) / 4` made the shadow
+                    // packet's RET tag a NEXT to 0 in any window but the fixed one, and the list ended there: a
+                    // fight's effects, HUD and pause menu were never drawn, seen on a Switch.)
+                    Value *R = B.CreateZExt(B.CreatePtrToInt(game(B, PI->getOperand(0)), I32), PI->getType());
+                    PI->replaceAllUsesWith(R);
+                    PI->eraseFromParent();
+                }
+            } else if (auto *BO = dyn_cast<BinaryOperator>(I); BO && !PortModule && BO->getOpcode() == Instruction::Sub) {
+                // the same with an ordinary pointer that is a constant (a global's address): `p - gTable`
+                for (unsigned k = 0; k < 2; k++) {
+                    auto *CE = dyn_cast<ConstantExpr>(BO->getOperand(k));
+                    Value *other = BO->getOperand(1 - k);
+                    auto *OP = dyn_cast<PtrToIntInst>(other);
+                    if (CE && CE->getOpcode() == Instruction::PtrToInt && CE->getOperand(0)->getType()->getPointerAddressSpace() == 0 &&
+                        OP && isGame(OP->getPointerOperand()->getType())) {
+                        Value *g = B.Insert(CastInst::Create(Instruction::PtrToInt, gameC(CE->getOperand(0)), I32));
+                        BO->setOperand(k, B.Insert(CastInst::Create(Instruction::ZExt, g, CE->getType())));
+                    }
                 }
             } else if (auto *L = dyn_cast<LoadInst>(I)) {
                 L->setOperand(L->getPointerOperandIndex(), mem(I, L->getPointerOperand()));
@@ -601,7 +667,7 @@ struct Window {
             GlobalVariable *g = M.getGlobalVariable(a.substr(0, eq), true);
             if (g && g->isDeclaration()) {
                 uint64_t addr = std::stoull(a.substr(eq + 1), nullptr, 0);
-                g->replaceAllUsesWith(ConstantExpr::getGetElementPtr(I8, window(), ConstantInt::get(I64, addr)));
+                g->replaceAllUsesWith(ConstantExpr::getGetElementPtr(I8, windowAt(), ConstantInt::get(I64, addr)));
                 g->eraseFromParent();
             }
         }
@@ -650,6 +716,7 @@ struct Window {
                 fixCall(CI);
             }
         }
+        InData = true;
         for (GlobalVariable &G : M.globals()) {
             if (G.hasInitializer()) {
                 Constant *f = fixC(G.getInitializer());
@@ -658,6 +725,7 @@ struct Window {
                 }
             }
         }
+        InData = false;
         std::map<std::string, std::string> db;
         if (!Sigs.empty()) {
             auto buf = MemoryBuffer::getFile(Sigs);

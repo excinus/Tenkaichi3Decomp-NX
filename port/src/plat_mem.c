@@ -26,7 +26,7 @@ static uint32_t sHeapNext = HEAP_FIRST, sHeapEnd = HEAP_END;
 
 /* The 64-bit builds (the game's pointers 4 bytes wide, ptr32.py) keep the port's blocks for the game in a region of
    their own (Port_LowAlloc); the 32-bit build uses the C library's. */
-#if defined(__x86_64__) || defined(__APPLE__)
+#if defined(__x86_64__) || defined(__APPLE__) || defined(__SWITCH__)
 #define PORT_LOW_REGION 1
 #else
 #define PORT_LOW_REGION 0
@@ -273,6 +273,464 @@ int __wrap_main(int argc, char **argv) {
     return sResult;
 }
 
+#elif defined(__SWITCH__)
+/* ------------------------------------------------------------------------------------------- Nintendo Switch
+   The macOS model (above) on Horizon (docs/port/switch_plan.md): the launcher chose a free 4 GB window, loaded this
+   program at window + 0x20000000 and left the rest of it free (PORT_WINDOW, port_addr.h).
+     - Horizon has no mmap at a chosen address: a region is memory from the C library's heap, mapped at its place
+       with svcMapProcessCodeMemory and made read-write with svcSetProcessMemoryPermission (what homebrew loaders do
+       to place a program; checked on consoles by port/switch/spike). The calls are allowed to this program by the
+       launcher's NPDM, and the launcher hands over the process handle (libnx: envGetOwnProcessHandle);
+     - no pages taken as first used: a region is backed in full when it is mapped (the low arena's 192 MB too;
+       the console gives an application about 3.2 GB);
+     - pages are 4 KB; the memory is cleared, as mmap's is;
+     - the game's main() runs on a stack in the window, on the main thread, as on macOS. */
+#include <malloc.h> /* memalign */
+#include <fcntl.h>  /* open */
+#include <unistd.h> /* chdir, fsync, dup2 */
+#include <switch.h>
+
+/* The window's base for the game's code (port/tools/macwin/macwin.cpp loads it in every function): 0x20000000 below
+   the program's first byte (__start__, libnx's linker script), wherever the launcher loaded it. (An 8-byte pointer
+   in data: the launcher moves it with the program, port/tools/nx_reloc.py.) */
+extern char __start__[];
+void *Port_Window = __start__ - 0x20000000;
+
+/* Before everything else (and before any getenv): the window reserved, and the Switch has neither a terminal nor
+   environment variables.
+   - the program's output (stdout and stderr) goes to bt3_log.txt in its folder, the one before kept as
+     bt3_log_prev.txt, as on Windows (plat_crash.c);
+   - bt3_env.txt in its folder, if there is one, sets the environment variables the PC builds take from the shell:
+     one NAME=value per line, # for a comment (for tests, e.g. BT3_DEMO=1 and BT3_GS=none for the demo fight).
+   The folder is the working folder: libnx starts there, the launcher naming the program by its full path. */
+static void watch_start(void);
+
+__attribute__((constructor(101))) static void nx_start(void) {
+    FILE *f;
+    char line[1024];
+
+    /* the window is this program's: nothing libnx maps later (threads' stacks, shared memory) may go there */
+    virtmemLock();
+    virtmemAddReservation((void *)PORT_WINDOW, 0x100000000ull);
+    virtmemUnlock();
+
+    remove("bt3_log_prev.txt");
+    rename("bt3_log.txt", "bt3_log_prev.txt");
+    /* Opened once, as descriptors 1 and 2 (stdout's and stderr's): the Switch's file system lets only one handle
+       write a file, so a second freopen of the same file failed and closed stderr, and everything the program
+       wrote there (nearly all of its output) was lost from phase 4's first run on. */
+    {
+        int fd = open("bt3_log.txt", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (fd >= 0) {
+            fflush(stdout);
+            fflush(stderr);
+            dup2(fd, 1);
+            dup2(fd, 2);
+            close(fd);
+            /* in blocks, put on the card by the watch thread twice a second (nx_watch): line by line, each line was
+               a write to the card of about 4 ms on the thread that wrote it (a fight's slow-frame lines, three a
+               frame, on the game's and the render thread) */
+            setvbuf(stdout, NULL, _IOFBF, 64 * 1024);
+            setvbuf(stderr, NULL, _IOFBF, 64 * 1024);
+        }
+    }
+    watch_start();
+    f = fopen("bt3_env.txt", "r");
+    if (f == NULL) {
+        return;
+    }
+    while (fgets(line, sizeof(line), f) != NULL) {
+        char *eq, *end = line + strlen(line);
+        while (end > line && (end[-1] == '\n' || end[-1] == '\r' || end[-1] == ' ')) {
+            *--end = '\0';
+        }
+        eq = strchr(line, '=');
+        if (line[0] == '#' || eq == NULL || eq == line) {
+            continue;
+        }
+        *eq = '\0';
+        setenv(line, eq + 1, 1);
+        fprintf(stderr, "bt3: bt3_env.txt: %s=%s\n", line, eq + 1);
+    }
+    fclose(f);
+}
+
+static void *map_at(uint32_t addr, uint32_t size) {
+    uint64_t at = (PORT_WINDOW + addr) & ~(uint64_t)0xFFF, n = ((PORT_WINDOW + addr + size + 0xFFF) & ~(uint64_t)0xFFF) - at;
+    Handle self = envGetOwnProcessHandle();
+    void *src = memalign(0x1000, n);
+
+    if (src == NULL) {
+        return NULL;
+    }
+    if (R_FAILED(svcMapProcessCodeMemory(self, at, (uint64_t)(uintptr_t)src, n))) {
+        free(src);
+        return NULL;
+    }
+    if (R_FAILED(svcSetProcessMemoryPermission(self, at, n, Perm_Rw))) {
+        if (R_SUCCEEDED(svcUnmapProcessCodeMemory(self, at, (uint64_t)(uintptr_t)src, n))) {
+            free(src);
+        }
+        return NULL;
+    }
+    memset((void *)(uintptr_t)at, 0, n); /* (the heap's memory is not cleared; the game expects mmap's zeros) */
+    return (void *)(uintptr_t)at;
+}
+
+static void map(uint32_t addr, uint32_t size, const char *what) {
+    if (map_at(addr, size) == NULL) {
+        fprintf(stderr, "bt3: cannot map %s at window + 0x%08X\n", what, addr);
+        exit(2);
+    }
+}
+
+static void map_heap(void) {
+    map(HEAP_BASE, HEAP_END - HEAP_BASE, "the game heap");
+}
+
+#define STACK_BASE 0x02000000u
+#define STACK_SIZE 0x01000000u
+extern int __real_main(int argc, char **argv);
+extern void Port_CallOnStack(void (*fn)(void), void *top);
+PORT_HOST static int sArgc = 0, sResult = 0; /* (the process's own arguments, not game state) */
+PORT_HOST static char **sArgv = NULL;
+
+/* fn() with the stack pointer at `top` (as on macOS; ELF names) */
+__asm__(".text\n.globl Port_CallOnStack\n.type Port_CallOnStack, %function\n.p2align 2\nPort_CallOnStack:\n"
+        "    stp x29, x30, [sp, #-16]!\n    mov x29, sp\n    mov sp, x1\n    blr x0\n"
+        "    mov sp, x29\n    ldp x29, x30, [sp], #16\n    ret\n");
+
+static void game_main(void) {
+    sResult = __real_main(sArgc, sArgv);
+}
+
+int __wrap_main(int argc, char **argv) {
+    extern void Port_WatchStop(void), Port_ProfileStart(void);
+
+    sArgc = argc;
+    sArgv = argv;
+    sGameStackTop = (uint8_t *)Port_Ptr(STACK_BASE + STACK_SIZE);
+    gPortStage = "the game is running (on its stack in the window)";
+    Port_ProfileStart();
+    Port_CallOnStack(game_main, sGameStackTop);
+    Port_WatchStop();
+    return sResult;
+}
+
+/* The watch thread: started first of all (nx_start, before the game's data is read and its memory reserved), beside
+   the game until it returns to the launcher. Twice a second:
+   the log onto the card (its buffers emptied, fsync), so that what the game wrote is kept when it is ended from outside while it hangs;
+   and every 2 seconds for the first 3 minutes, after that when nothing is drawn or the file service is called more
+   than 2000 times a second, a few lines in bt3_watch.txt: the time, how late the thread woke (a busy processor), the
+   frame counters, the start's stage, the file service's calls (plat_nxfs.c), any call that has not come back for a
+   second, and the main thread's last call. bt3_watch.txt is written through libnx's file service directly, not the C
+   library (whose locks a stuck thread of the game may hold): the first kits of phase 4 hung the console with nothing
+   in the log, and in the one before this the watch thread, then started at main() and writing with fopen, did not
+   get to write its first line. (Nothing goes to the log from this thread: the C library's stream has a lock.) */
+extern size_t NxFs_Report(char *out, size_t cap, unsigned ms);
+extern size_t NxFs_Stuck(char *out, size_t cap, unsigned ms);
+extern size_t NxFs_MainLast(char *out, size_t cap);
+extern size_t NxTrace_Report(char *out, size_t cap);
+extern void NxTrace_SetMain(void);
+extern size_t GsDraw_DecodeReport(char *out, size_t cap); /* gs/gs_draw.c */
+extern unsigned long long NxFs_Total(void);
+extern void NxFs_SetThreads(Handle mainThread, Handle watchThread);
+extern Result __real_fsFsDeleteFile(FsFileSystem *fs, const char *p);
+extern Result __real_fsFsRenameFile(FsFileSystem *fs, const char *p, const char *q);
+extern Result __real_fsFsCreateFile(FsFileSystem *fs, const char *p, s64 size, u32 option);
+extern Result __real_fsFsOpenFile(FsFileSystem *fs, const char *p, u32 mode, FsFile *out);
+extern Result __real_fsFileWrite(FsFile *f, s64 off, const void *buf, u64 size, u32 option);
+extern void __real_fsFileClose(FsFile *f);
+static volatile int sWatchStop; /* the game has returned to the launcher */
+static Thread sWatch, sProf;
+static int sWatching, sProfiling, sLogFd[2] = {-1, -1};
+static Handle sMainHandle;
+
+/* The sampling profile (a thread of its own, nx_prof): about 250 times a second the game's thread is paused, where it
+   is read (svcGetThreadContext3) and it goes on. Counted by address (an offset from the program's start, __start__:
+   + 0x4020000000 in the build's bt3_nx.map): every sample over the last 30 s, and the samples taken while the game
+   had not reached a vertical blank for 100 ms (a stall: the main menu's at each move, 1 to 3 s of "game code",
+   2026-10-29), the address and the return address (lr: its caller) apart. In bt3_watch.txt. */
+#define PROF_SLOTS 4096
+enum { PROF_ALL, PROF_STALL, PROF_STALL_LR, PROF_RENDER, PROF_RENDER_LR, PROF_TABLES };
+/* The render thread too, when there is one (gs/gs_core.c names itself: Port_ProfileThread), every 30 s: where the
+   OpenGL driver's time goes (24 ms of a fight frame at the stock clock, 2026-10-30), its address and its caller. */
+static volatile Handle sRenderHandle;
+void Port_ProfileThread(void) {
+    sRenderHandle = threadGetCurHandle();
+}
+static struct { uint32_t off, n; } sProfTab[PROF_TABLES][PROF_SLOTS];
+static unsigned sProfCount[PROF_TABLES];
+static Mutex sProfLock;
+
+static void prof_add(int k, uint64_t addr) {
+    extern char __start__[];
+    uint64_t base = (uint64_t)(uintptr_t)__start__;
+    uint32_t off = addr >= base && addr - base < 0xFFFFFFFFull ? (uint32_t)(addr - base) : 0xFFFFFFFFu, h = off * 2654435761u, i;
+    for (i = 0; i < PROF_SLOTS; i++) {
+        uint32_t s = (h + i) & (PROF_SLOTS - 1);
+        if (sProfTab[k][s].n == 0 || sProfTab[k][s].off == off) {
+            sProfTab[k][s].off = off;
+            sProfTab[k][s].n++;
+            break;
+        }
+    }
+    sProfCount[k]++;
+}
+
+static void nx_prof(void *arg) {
+    extern unsigned gPortVBlanks;
+    unsigned blank = gPortVBlanks;
+    u64 per = armGetSystemTickFreq() / 1000, changed = armGetSystemTick();
+
+    (void)arg;
+    while (!sWatchStop) {
+        ThreadContext ctx;
+        u64 now;
+        int stalled;
+        svcSleepThread(4000000ull);
+        now = armGetSystemTick();
+        if (gPortVBlanks != blank) {
+            blank = gPortVBlanks;
+            changed = now;
+        }
+        stalled = (now - changed) / per > 100;
+        if (R_FAILED(svcSetThreadActivity(sMainHandle, ThreadActivity_Paused))) {
+            continue;
+        }
+        if (R_SUCCEEDED(svcGetThreadContext3(&ctx, sMainHandle))) {
+            svcSetThreadActivity(sMainHandle, ThreadActivity_Runnable);
+            mutexLock(&sProfLock);
+            prof_add(PROF_ALL, ctx.pc.x);
+            if (stalled) {
+                prof_add(PROF_STALL, ctx.pc.x);
+                prof_add(PROF_STALL_LR, ctx.lr);
+            }
+            mutexUnlock(&sProfLock);
+        } else {
+            svcSetThreadActivity(sMainHandle, ThreadActivity_Runnable);
+        }
+        if (sRenderHandle != 0 && R_SUCCEEDED(svcSetThreadActivity(sRenderHandle, ThreadActivity_Paused))) {
+            if (R_SUCCEEDED(svcGetThreadContext3(&ctx, sRenderHandle))) {
+                svcSetThreadActivity(sRenderHandle, ThreadActivity_Runnable);
+                mutexLock(&sProfLock);
+                prof_add(PROF_RENDER, ctx.pc.x);
+                prof_add(PROF_RENDER_LR, ctx.lr);
+                mutexUnlock(&sProfLock);
+            } else {
+                svcSetThreadActivity(sRenderHandle, ThreadActivity_Runnable);
+            }
+        }
+    }
+}
+
+/* Table k's most frequent addresses as text into out, and the table emptied. The length written. */
+static size_t prof_report(int k, const char *what, char *out, size_t cap) {
+    size_t at = 0;
+    int r;
+
+    mutexLock(&sProfLock);
+    if (sProfCount[k] != 0) {
+        at += (size_t)snprintf(out + at, cap - at, "         %s: %u samples:", what, sProfCount[k]);
+        for (r = 0; r < 16 && at < cap; r++) {
+            uint32_t best = 0, i, bi = 0;
+            for (i = 0; i < PROF_SLOTS; i++) {
+                if (sProfTab[k][i].n > best) {
+                    best = sProfTab[k][i].n;
+                    bi = i;
+                }
+            }
+            if (best == 0) {
+                break;
+            }
+            at += (size_t)snprintf(out + at, cap - at, " %#x %u%%", sProfTab[k][bi].off, (unsigned)(best * 100u / sProfCount[k]));
+            sProfTab[k][bi].n = 0; /* (taken: the next best next) */
+        }
+        if (at < cap) {
+            at += (size_t)snprintf(out + at, cap - at, "\n");
+        }
+    }
+    memset(sProfTab[k], 0, sizeof(sProfTab[k]));
+    sProfCount[k] = 0;
+    mutexUnlock(&sProfLock);
+    return at < cap ? at : cap - 1;
+}
+static FsFile sWatchFile;
+static s64 sWatchAt = -1; /* where the next line goes; -1: bt3_watch.txt could not be made */
+
+/* bt3_watch.txt (the one before kept as bt3_watch_prev.txt), in the program's folder, by its path in the SD card's
+   file system (sdmc:/atmosphere/contents/<title>/Tenkaichi3Decomp -> /atmosphere/contents/<title>/) */
+static void watch_open(void) {
+    extern int __system_argc;
+    extern char **__system_argv;
+    FsFileSystem *fs = fsdevGetDeviceFileSystem("sdmc");
+    char dir[FS_MAX_PATH], now[FS_MAX_PATH], prev[FS_MAX_PATH];
+    const char *p = __system_argc > 0 && __system_argv[0] != NULL ? __system_argv[0] : "", *colon = strchr(p, ':');
+    char *slash;
+
+    snprintf(dir, sizeof(dir), "%s", colon != NULL ? colon + 1 : p);
+    slash = strrchr(dir, '/');
+    if (fs == NULL || slash == NULL) {
+        return;
+    }
+    slash[1] = '\0';
+    snprintf(now, sizeof(now), "%sbt3_watch.txt", dir);
+    snprintf(prev, sizeof(prev), "%sbt3_watch_prev.txt", dir);
+    __real_fsFsDeleteFile(fs, prev);
+    __real_fsFsRenameFile(fs, now, prev);
+    if (R_SUCCEEDED(__real_fsFsCreateFile(fs, now, 0, 0)) &&
+        R_SUCCEEDED(__real_fsFsOpenFile(fs, now, FsOpenMode_Write | FsOpenMode_Append, &sWatchFile))) {
+        sWatchAt = 0;
+    }
+}
+
+static void watch_write(const char *text, size_t n) {
+    if (sWatchAt >= 0 && n > 0 && R_SUCCEEDED(__real_fsFileWrite(&sWatchFile, sWatchAt, text, n, FsWriteOption_Flush))) {
+        sWatchAt += (s64)n;
+    }
+}
+
+/* (times in milliseconds: this file is built with software float, which has no 64-bit integer to double) */
+static void watch_line(const char *what, unsigned t, unsigned late, int report) {
+    extern unsigned gGsFrame, gPortVBlanks;
+    static char text[8192];
+    size_t at;
+
+    extern const char *volatile gPortWhere; /* plat_stub.c: where the game's thread is, roughly */
+    at = (size_t)snprintf(text, sizeof(text), "%5u.%u s: %s; woke %u ms late; frame %u, blank %u; %s; the game's thread: %s\n",
+                          t / 1000, t / 100 % 10, what, late, gGsFrame, gPortVBlanks, gPortStage, gPortWhere);
+    if (report && at < sizeof(text)) {
+        at += (size_t)snprintf(text + at, sizeof(text) - at, "         ");
+        at += NxFs_Report(text + at, sizeof(text) - at, 2000);
+        at += NxFs_Stuck(text + at, sizeof(text) - at, 1000);
+        at += NxFs_MainLast(text + at, sizeof(text) - at);
+        if (at + 9 < sizeof(text)) {
+            memcpy(text + at, "         ", 9);
+            at += 9 + GsDraw_DecodeReport(text + at + 9, sizeof(text) - at - 9);
+        }
+        at += NxTrace_Report(text + at, sizeof(text) - at);
+        at += prof_report(PROF_STALL, "the game's thread in stalls (offsets from __start__)", text + at, sizeof(text) - at);
+        at += prof_report(PROF_STALL_LR, "  and its return addresses then", text + at, sizeof(text) - at);
+        if (report & 2) {
+            at += prof_report(PROF_ALL, "the game's thread, the last 30 s (offsets from __start__)", text + at, sizeof(text) - at);
+        }
+        if (report & 4) {
+            at += prof_report(PROF_RENDER, "the render thread, the last 10 s", text + at, sizeof(text) - at);
+            at += prof_report(PROF_RENDER_LR, "  and its return addresses", text + at, sizeof(text) - at);
+        }
+    }
+    watch_write(text, at < sizeof(text) ? at : sizeof(text) - 1);
+}
+
+static void nx_watch(void *arg) {
+    extern unsigned gGsFrame, gPortVBlanks;
+    unsigned frame = gGsFrame, blank = gPortVBlanks, ticks = 0, n = 0, late = 0;
+    u64 freq = armGetSystemTickFreq() / 1000, start = armGetSystemTick(), was = start;
+    unsigned long long before = 0;
+
+    (void)arg;
+    watch_open();
+    watch_line("started", 0, 0, 0);
+    while (!sWatchStop) {
+        u64 now;
+        unsigned t, slept;
+
+        svcSleepThread(500000000ull);
+        now = armGetSystemTick();
+        t = (unsigned)((now - start) / freq);
+        slept = (unsigned)((now - was) / freq);
+        if (slept > 500 && slept - 500 > late) {
+            late = slept - 500; /* (the most in this report's 2 seconds) */
+        }
+        was = now;
+        /* the log's buffers onto the card: only when no thread is writing to them (a thread stuck in a write holds
+           the stream's lock; this thread must never wait for it) */
+        if (ftrylockfile(stdout) == 0) {
+            fflush(stdout);
+            funlockfile(stdout);
+        }
+        if (ftrylockfile(stderr) == 0) {
+            fflush(stderr);
+            funlockfile(stderr);
+        }
+        {
+            extern void Port_NxClockTick(void); /* plat_nxclock.c: the GPU's clock follows the console in or out of its dock */
+            Port_NxClockTick();
+        }
+        if (sLogFd[0] >= 0) {
+            fsync(sLogFd[0]);
+        }
+        if (sLogFd[1] >= 0) {
+            fsync(sLogFd[1]);
+        }
+        if (gGsFrame != frame || gPortVBlanks != blank) {
+            frame = gGsFrame;
+            blank = gPortVBlanks;
+            ticks = 0;
+        } else {
+            ticks++;
+        }
+        if (++n % 4 == 0) { /* (every 2 seconds) */
+            unsigned long long total = NxFs_Total();
+            if (t < 180000 || ticks >= 4 || total - before > 4000 || n % 20 == 0) {
+                /* (report: 1 the line, 2 the game's thread's 30 s, 4 the render thread's 10 s) */
+                watch_line(ticks >= 4 ? "nothing drawn" : "running", t, late, 1 | (n % 60 == 0 ? 2 : 0) | (n % 20 == 0 ? 4 : 0));
+            } else {
+                NxFs_Report(NULL, 0, 2000); /* (the counts start again for the next report) */
+            }
+            before = total;
+            late = 0;
+        }
+    }
+    watch_line("the game returned to the launcher", (unsigned)((armGetSystemTick() - start) / freq), 0, 0);
+    if (sWatchAt >= 0) {
+        __real_fsFileClose(&sWatchFile);
+    }
+}
+
+/* From nx_start, once the log is set up. (Core 1: the game is on core 0, its sound on core 2; a priority above the
+   C library's threads.) */
+static void watch_start(void) {
+    sLogFd[0] = 2; /* (stdout's and stderr's descriptors are the one file: nx_start) */
+    NxTrace_SetMain(); /* (this is the game's thread: the constructors run on it, and main() after them) */
+    if (R_SUCCEEDED(threadCreate(&sWatch, nx_watch, NULL, NULL, 0x10000, 0x2D, 1)) ||
+        R_SUCCEEDED(threadCreate(&sWatch, nx_watch, NULL, NULL, 0x10000, 0x2D, -2)) ||
+        R_SUCCEEDED(threadCreate(&sWatch, nx_watch, NULL, NULL, 0x10000, 0x3B, -2))) {
+        NxFs_SetThreads(threadGetCurHandle(), sWatch.handle);
+        sWatching = R_SUCCEEDED(threadStart(&sWatch));
+    }
+
+    if (!sWatching) {
+        fprintf(stderr, "bt3: watch: the thread did not start\n");
+    }
+}
+
+/* From main(), once bt3_env.txt has been read (BT3_PROFILE=0: no profile). */
+void Port_ProfileStart(void) {
+    sMainHandle = threadGetCurHandle();
+    if (getenv("BT3_PROFILE") == NULL || atoi(getenv("BT3_PROFILE")) != 0) {
+        if (R_SUCCEEDED(threadCreate(&sProf, nx_prof, NULL, NULL, 0x10000, 0x2D, 1)) ||
+            R_SUCCEEDED(threadCreate(&sProf, nx_prof, NULL, NULL, 0x10000, 0x2D, -2))) {
+            sProfiling = R_SUCCEEDED(threadStart(&sProf));
+        }
+    }
+}
+
+void Port_WatchStop(void) {
+    if (sWatching) {
+        sWatchStop = 1;
+        threadWaitForExit(&sWatch);
+        threadClose(&sWatch);
+        sWatching = 0;
+    }
+    if (sProfiling) {
+        sWatchStop = 1;
+        threadWaitForExit(&sProf);
+        threadClose(&sProf);
+        sProfiling = 0;
+    }
+}
+
 #else
 /* -------------------------------------------------------------------------------------------------------- Linux */
 #include <sys/mman.h>
@@ -395,6 +853,11 @@ static void Port_LoadGameData(void) {
 #elif defined(__APPLE__)
     uint32_t exeSize = sizeof(exe) - 1;
     long n = _NSGetExecutablePath(exe, &exeSize) == 0 ? (long)strlen(exe) : -1;
+#elif defined(__SWITCH__)
+    /* the path the launcher started it with (sdmc:/atmosphere/contents/<title>/Tenkaichi3Decomp) */
+    extern int __system_argc;
+    extern char **__system_argv;
+    long n = __system_argc > 0 && __system_argv[0] != NULL ? (long)snprintf(exe, sizeof(exe), "%s", __system_argv[0]) : -1;
 #else
     long n = (long)readlink("/proc/self/exe", exe, sizeof(exe) - 1);
 #endif
@@ -611,7 +1074,7 @@ __attribute__((constructor)) static void Port_MapMemory(void) {
     gPortStage = "reading the game's programs from gamedata";
     Port_LoadGameData();
     gPortStage = "reserving the game's memory";
-#if defined(__APPLE__)
+#if defined(__APPLE__) || defined(__SWITCH__)
     map(STACK_BASE, STACK_SIZE, "the game thread's stack");
     low_region_take(); /* the region of Port_LowAlloc, now (see there) */
 #elif defined(__x86_64__) && !defined(_WIN32)
@@ -661,8 +1124,8 @@ static void low_region_take(void) {
             exit(2);
         }
         sLowCommitted = sLowArena;
-#elif defined(__APPLE__)
-        sLowArena = map_at(LOW_ARENA_BASE, LOW_ARENA_SIZE); /* (pages are only taken as they are first used) */
+#elif defined(__APPLE__) || defined(__SWITCH__)
+        sLowArena = map_at(LOW_ARENA_BASE, LOW_ARENA_SIZE); /* (macOS: pages are only taken as they are first used) */
         if (sLowArena == NULL) {
             fprintf(stderr, "bt3: the window has no room for the port's own blocks\n");
             exit(2);

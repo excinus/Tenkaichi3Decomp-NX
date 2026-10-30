@@ -13,7 +13,7 @@ Usage: port/tools/make_state.py  (run by link.py after a successful link; BT3_CC
 import bisect, itertools, pathlib, re, sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from toolchain import OBJ, DATA, EXE, MAC
+from toolchain import OBJ, DATA, EXE, MAC, NX, NX_WINDOW
 
 PORT_STATE = {"headless", "mathf_pc", "plat_file", "plat_libm", "plat_mc", "plat_mem", "plat_sndstate", "plat_stub", "plat_sys", "softfloat_ps2",
               "vu0_a", "vu0_b", "gs_marker"}
@@ -94,6 +94,9 @@ def main():
         ranges, others, text = mac_map(text)
     else:
         ranges, others, text = linux_map(text)
+    base = NX_WINDOW if NX else 0  # the Switch: GNU ld's map as on Linux, its addresses in the window (port_addr.h)
+    ranges = [(a - base, b - base) for a, b in ranges]
+    others = [(a - base, b - base) for a, b in others]
     ranges.sort()
     others.sort()
     starts = [x for x, _ in others]
@@ -116,7 +119,7 @@ def main():
         m = re.search(r"^\s+0x([0-9a-fA-F]+)\s+" + name + r"\s*$", text, re.M)
         if m is None:
             sys.exit(f"make_state: {name} is not in the map")
-        marks.append(f"{k:x} {int(m.group(1), 16):x}\n")
+        marks.append(f"{k:x} {int(m.group(1), 16) - base:x}\n")
     path = pathlib.Path(str(EXE) + ".mem")
     path.write_text("".join(marks) + "".join(f"{a:x} {b - a:x}\n" for a, b in merged))
     print(f"{path.name}: {len(merged)} ranges of game variables, {sum(b - a for a, b in merged):,} bytes")

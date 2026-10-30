@@ -2,6 +2,10 @@
 #include "menu/menu_c.h"
 #include "sys/pad.h"
 #include "sys/save.h"
+#ifdef PORT
+extern void Port_MenuPage(int screen); /* port/src/gs_marker.c: widescreen menus */
+extern void Port_MenuFill(int on);
+#endif
 
 HistResult *gHistResult = NULL; /* 0x3B1300 */
 
@@ -266,7 +270,14 @@ void HistResult_Draw(void) {
     s32 i;
     MFlash *flash;
 
+#ifdef PORT
+    Port_MenuPage(14); /* widescreen menus: this screen's page, its backdrop filling the width */
+    Port_MenuFill(1);
     Sprite_DrawPicture(gHistResult->bg, 0, 0, 0x80);
+    Port_MenuFill(0);
+#else
+    Sprite_DrawPicture(gHistResult->bg, 0, 0, 0x80);
+#endif
     flash = &gHistResult->flash[0];
     for (i = 0; i < 2; i++) {
         sprintf(name, "mc_result_text_%d", i + 1);
@@ -331,6 +342,9 @@ void HistResult_Draw(void) {
         Flash_Draw(&gHistResult->flash[i]);
     }
     GetWin_Draw();
+#ifdef PORT
+    Port_MenuPage(0);
+#endif
 }
 
 /* Steps the movie; when the "fl_out" animation has ended, leaves. */

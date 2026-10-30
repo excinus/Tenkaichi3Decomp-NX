@@ -23,6 +23,15 @@
    generated port_version.h. The release container is never given that variable.) */
 #ifdef PORT_UPDATE_TEST_KEY
 #define PORT_UPDATE_KEY PORT_UPDATE_TEST_KEY
+#elif defined(__SWITCH__)
+/* The Switch: this fork's own key (docs/port/switch_plan.md, phase 5), never the one above. Its release workflow
+   (.github/workflows/switch-release.yml) takes the public half from its signing secret and passes it to the build
+   (BT3_UPDATE_KEY: port/tools/undefined.py writes it into port_version.h); a build without it has none (zeros). */
+#ifdef PORT_UPDATE_KEY_BUILD
+#define PORT_UPDATE_KEY PORT_UPDATE_KEY_BUILD
+#else
+#define PORT_UPDATE_KEY "0000000000000000000000000000000000000000000000000000000000000000"
+#endif
 #else
 #define PORT_UPDATE_KEY PORT_UPDATE_KEY_RELEASE
 #endif
