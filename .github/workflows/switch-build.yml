@@ -98,7 +98,9 @@ jobs:
           UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
         run: |
           if [ -n "$UPDATE_SIGNING_KEY" ]; then
-            echo "BT3_UPDATE_KEY=$(python3 src/port/tools/update_key.py public)" >> "$GITHUB_ENV"
+            pub=$(python3 src/port/tools/update_key.py public)
+            echo "BT3_UPDATE_KEY=$pub" >> "$GITHUB_ENV"
+            echo "the update key's public half (not secret; games check signatures with it): $pub"
           else
             echo "::warning title=Unsigned release::The secret UPDATE_SIGNING_KEY is not set: this build has no update key and its zip is not signed (games only say that a newer release exists). See docs/port/switch_plan.md, phase 5."
           fi
