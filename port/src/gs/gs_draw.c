@@ -2161,6 +2161,10 @@ static void scale_apply(void) {
         gsPendingScale = 0;
         return;
     }
+    {
+        extern void GsGl_Drain(void); /* gs_gl.c: the frame the GL thread is drawing, at the scale it was recorded at */
+        GsGl_Drain();
+    }
     gsScale = gsPendingScale; /* the back end's attachments and copies are rebuilt to this size */
     gsPendingScale = 0;
     sBackend->scaleChanged();
@@ -4908,6 +4912,12 @@ static void skip_decide(void) {
 
 void GsGpu_FrameEnd(void) {
     extern const char *volatile gPortWhere; /* plat_stub.c */
+    extern int GsGl_Split(void);            /* gs_gl.c */
+    if (gsInterp > 0 && GsGl_Split()) {
+        /* Smooth motion's pictures are drawn from the frame's arrays as they are swapped in and out here, which the GL
+           thread's hand-over of the arrays (gs_gl.c, frame_end) does not allow for: off with the GL thread. */
+        gsInterp = 0;
+    }
     gPortWhere = "showing a picture (the frame's end)";
     sInGlowChain = 0; /* (a chain is always within one frame) */
     if (gPortResim) { /* a frame that is only being re-run: nothing was recorded, nothing is shown */
@@ -4956,6 +4966,9 @@ void GsGpu_FrameEnd(void) {
         if (gsInterp < 0) {
             gsInterp = getenv("BT3_INTERP") != NULL ? atoi(getenv("BT3_INTERP")) : Port_Setting("interp", 0);
             gsInterp = gsInterp < 0 ? 0 : gsInterp > 3 ? 3 : gsInterp;
+            if (GsGl_Split()) {
+                gsInterp = 0; /* (see the top of this function) */
+            }
             sInterpPrev = malloc(MAX_VU_UNIFORMS * sizeof(Vu0Uniform));
             sInterpBlend = malloc(MAX_VU_UNIFORMS * sizeof(Vu0Uniform));
             sInterpPrevSig = malloc(MAX_VU_UNIFORMS * sizeof(uint32_t));

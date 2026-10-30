@@ -13,6 +13,7 @@
  * The GL floor is 3.3 core.
  */
 #include <SDL3/SDL.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stddef.h>
@@ -379,13 +380,190 @@ typedef struct Pipe { uint32_t key, bkey, wmask; int ztst, zwrite, topo, vu, fx,
 static Pipe sPipes[1024];
 static int sPipeCount;
 
+/* ---- the GL thread (BT3_GL_THREAD=0/1; on the Switch by default) ------------------------------------------------
+ * The OpenGL driver's own work for a fight frame (Mesa's per-draw CPU work: 23 ms of draws at the Switch's stock clock,
+ * 2026-10-30) and the walk of the frame's list that records the draws (14 ms there) were one thread's, 41 ms a drawn
+ * frame against the 33 of a tick. With this thread the context is its own: the render thread (or the game's, without
+ * it) records as before and hands each frame over (frame_end: the arrays of draws and vertices in turn, two sets), and
+ * what it asks of the back end meanwhile (textures made, filled and deleted, targets made and dropped) is queued
+ * behind the frame before, in order. Textures are then ids of this file's (sNames: the GL thread's name for each), a
+ * target's attachment an id for "target i's colour" (TEX_SPECIAL), so that nothing waits for a GL name; reading a
+ * target back (the cross-fade's snapshot), copying one and a new scale wait until the queue has been carried out. */
+typedef struct GlFrame {
+    GsDraw *draws;
+    Vtx *verts;
+    float *vuVerts;
+    uint32_t *vuIdx;
+    Vu0Uniform *vuUni;
+    uint32_t drawCount, vertCount, vuVertCount, vuIdxCount;
+    GsTarget *targets;                 /* gsTargets itself, or with the GL thread a copy taken at the hand-over */
+    GsTarget targetCopy[MAX_TARGETS];
+    int best;                          /* the target shown */
+    float zmax;
+    unsigned frame;
+    uint32_t *fbPx[2];                 /* a movie's picture uploaded into display buffer 0 / 1, read out of GS memory */
+    int *date;                         /* per DATE copy (native 5) in order: whether there is one, x, y, w, h */
+    uint32_t dateCap;
+} GlFrame;
+
+enum { GLQ_TEX_CREATE = 1, GLQ_TEX_UPLOAD, GLQ_TEX_DESTROY, GLQ_TARGET_ENSURE, GLQ_TARGET_DROP, GLQ_FRAME, GLQ_CALL };
+typedef struct GlCmd {
+    int op, level, format;
+    uint32_t id, w, h, bytes;
+    const void *px;
+    void (*fn)(void *);
+    void *arg;
+} GlCmd;
+
+#define TEX_SPECIAL 0x80000000u /* | kind << 16 | target: kind 1 its colour, 2 its aux, 3 its depth; kind 4 the white texture */
+static int sSplit;
+static pthread_t sGlThread;
+static pthread_mutex_t sQLock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t sQWake = PTHREAD_COND_INITIALIZER, sQIdle = PTHREAD_COND_INITIALIZER;
+static GlCmd *sQ, *sQRun;          /* the queue being filled; the one the GL thread carries out */
+static size_t sQCount, sQCap, sQRunCap;
+static int sQBusy, sQStop, sQFrames; /* (sQFrames: frames handed over and not drawn yet) */
+static uint64_t sGlIdleNs;         /* (BT3_GS_VERBOSE) */
+static GLuint *sNames;             /* the GL thread's: each texture id's name */
+static uint32_t sNamesCap;
+static uint32_t *sIdFree, sIdFreeCount, sIdFreeCap, sIdNext = 1;
+static uint32_t *sIdLater, sIdLaterCount, sIdLaterCap; /* deleted in the frame being recorded: given out again after it */
+static void gl_run(GlCmd *c);
+
+static int on_gl_thread(void) {
+    return sSplit && pthread_equal(pthread_self(), sGlThread);
+}
+
+/* A call that has to be queued: the GL thread is there and this is not it. */
+static int queued(void) {
+    return sSplit && !on_gl_thread();
+}
+
+static void q_put(const GlCmd *c) {
+    pthread_mutex_lock(&sQLock);
+    if (sQCount == sQCap) {
+        sQCap = sQCap ? sQCap * 2 : 1024;
+        sQ = realloc(sQ, sQCap * sizeof(*sQ));
+    }
+    sQ[sQCount++] = *c;
+    pthread_cond_signal(&sQWake);
+    pthread_mutex_unlock(&sQLock);
+}
+
+/* Returns once everything queued has been carried out. */
+static void q_drain(void) {
+    if (!queued()) {
+        return;
+    }
+    pthread_mutex_lock(&sQLock);
+    while (sQCount != 0 || sQBusy) {
+        pthread_cond_wait(&sQIdle, &sQLock);
+    }
+    pthread_mutex_unlock(&sQLock);
+}
+
+/* fn(arg) on the GL thread, after everything queued before it; returns when it is done. */
+static void q_call(void (*fn)(void *), void *arg) {
+    GlCmd c;
+    if (!queued()) {
+        fn(arg);
+        return;
+    }
+    memset(&c, 0, sizeof(c));
+    c.op = GLQ_CALL;
+    c.fn = fn;
+    c.arg = arg;
+    q_put(&c);
+    q_drain();
+}
+
+/* A command on the GL thread: queued, or at once there. */
+static void q_do(GlCmd *c) {
+    if (queued()) {
+        q_put(c);
+    } else {
+        gl_run(c);
+    }
+}
+
+/* The GL name of what a draw samples. */
+static GLuint tex_name(GsTex h) {
+    uint32_t v = (uint32_t)h;
+    if (!sSplit || h == 0) {
+        return (GLuint)h;
+    }
+    if (v & TEX_SPECIAL) {
+        int kind = (int)((v >> 16) & 15), i = (int)(v & 0xFFFF);
+        return kind == 1 ? sTgCol[i] : kind == 2 ? sTgAux[i] : kind == 3 ? sTgDep[i] : sWhite;
+    }
+    return v < sNamesCap ? sNames[v] : 0;
+}
+
+static uint32_t id_take(void) {
+    uint32_t id;
+    pthread_mutex_lock(&sQLock);
+    id = sIdFreeCount ? sIdFree[--sIdFreeCount] : sIdNext++;
+    pthread_mutex_unlock(&sQLock);
+    return id;
+}
+
+static void id_put(uint32_t id) {
+    pthread_mutex_lock(&sQLock);
+    if (sIdLaterCount == sIdLaterCap) {
+        sIdLaterCap = sIdLaterCap ? sIdLaterCap * 2 : 256;
+        sIdLater = realloc(sIdLater, sIdLaterCap * sizeof(*sIdLater));
+    }
+    sIdLater[sIdLaterCount++] = id;
+    pthread_mutex_unlock(&sQLock);
+}
+
+/* At a hand-over: the ids deleted while that frame was recorded can be given out again. */
+static void id_release_later(void) {
+    pthread_mutex_lock(&sQLock);
+    if (sIdFreeCount + sIdLaterCount > sIdFreeCap) {
+        sIdFreeCap = (sIdFreeCount + sIdLaterCount) * 2;
+        sIdFree = realloc(sIdFree, sIdFreeCap * sizeof(*sIdFree));
+    }
+    memcpy(sIdFree + sIdFreeCount, sIdLater, sIdLaterCount * sizeof(*sIdLater));
+    sIdFreeCount += sIdLaterCount;
+    sIdLaterCount = 0;
+    pthread_mutex_unlock(&sQLock);
+}
+
+static void name_set(uint32_t id, GLuint t) {
+    if (id >= sNamesCap) {
+        uint32_t cap = sNamesCap ? sNamesCap : 1024;
+        while (cap <= id) { cap *= 2; }
+        sNames = realloc(sNames, cap * sizeof(*sNames));
+        memset(sNames + sNamesCap, 0, (cap - sNamesCap) * sizeof(*sNames));
+        sNamesCap = cap;
+    }
+    sNames[id] = t;
+}
+
 static void target_ensure(int i);
 static void target_drop(int i);
+static void target_ensure_now(int i);
+static void target_drop_now(int i);
 static void set_pipe(int pipe);
 static void bind_target(int i, int clear);
 
 /* ---- the attachments of the shared targets ------------------------------------------------------ */
 static void target_ensure(int i) {
+    GlCmd c = {0};
+    c.op = GLQ_TARGET_ENSURE;
+    c.id = (uint32_t)i;
+    q_do(&c);
+}
+
+static void target_drop(int i) {
+    GlCmd c = {0};
+    c.op = GLQ_TARGET_DROP;
+    c.id = (uint32_t)i;
+    q_do(&c);
+}
+
+static void target_ensure_now(int i) {
     GLenum bufs[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
     glGenTextures(1, &sTgCol[i]);
     glBindTexture(GL_TEXTURE_2D, sTgCol[i]);
@@ -410,7 +588,7 @@ static void target_ensure(int i) {
     }
 }
 
-static void target_drop(int i) {
+static void target_drop_now(int i) {
     glDeleteTextures(1, &sTgCol[i]);
     glDeleteTextures(1, &sTgAux[i]);
     glDeleteTextures(1, &sTgDep[i]);
@@ -418,24 +596,54 @@ static void target_drop(int i) {
     sTgCol[i] = sTgAux[i] = sTgDep[i] = sTgFbo[i] = 0;
 }
 
-static GsTex target_color(int i) { return (GsTex)sTgCol[i]; }
-static GsTex target_aux(int i) { return (GsTex)sTgAux[i]; }
-static GsTex target_depth(int i) { return (GsTex)sTgDep[i]; }
+static GsTex target_color(int i) { return sSplit ? (GsTex)(TEX_SPECIAL | 1u << 16 | (uint32_t)i) : (GsTex)sTgCol[i]; }
+static GsTex target_aux(int i) { return sSplit ? (GsTex)(TEX_SPECIAL | 2u << 16 | (uint32_t)i) : (GsTex)sTgAux[i]; }
+static GsTex target_depth(int i) { return sSplit ? (GsTex)(TEX_SPECIAL | 3u << 16 | (uint32_t)i) : (GsTex)sTgDep[i]; }
 
 /* Makes a texture; its levels come with tex_upload. GL_TEXTURE_MAX_LEVEL bounds the chain so that a mipmapped
    replacement is complete even if the pack's chain stops short of 1x1. */
-static GsTex tex_create(uint32_t w, uint32_t h, int format, int levels) {
+static GLuint tex_create_now(int levels) {
     GLuint t;
-    (void)w; (void)h; (void)format;
     glGenTextures(1, &t);
     glBindTexture(GL_TEXTURE_2D, t);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, levels > 0 ? levels - 1 : 0);
-    return (GsTex)t;
+    return t;
+}
+
+static GsTex tex_create(uint32_t w, uint32_t h, int format, int levels) {
+    (void)w; (void)h; (void)format;
+    if (sSplit) {
+        GlCmd c = {0};
+        c.op = GLQ_TEX_CREATE;
+        c.id = id_take();
+        c.level = levels;
+        q_do(&c);
+        return (GsTex)c.id;
+    }
+    return (GsTex)tex_create_now(levels);
 }
 
 /* Uploads a level at once (GL has no upload queue; the pixels are copied). Takes ownership of px. */
+static void tex_upload_now(GLuint t, int level, uint32_t w, uint32_t h, int format, const void *px, uint32_t bytes);
 static int tex_upload(GsTex handle, int level, uint32_t w, uint32_t h, int format, const void *px, uint32_t bytes) {
-    GLuint t = (GLuint)handle;
+    if (sSplit) {
+        GlCmd c = {0};
+        c.op = GLQ_TEX_UPLOAD;
+        c.id = (uint32_t)handle;
+        c.level = level;
+        c.w = w;
+        c.h = h;
+        c.format = format;
+        c.px = px;
+        c.bytes = bytes;
+        q_do(&c);
+        return 1;
+    }
+    tex_upload_now((GLuint)handle, level, w, h, format, px, bytes);
+    return 1;
+}
+
+static void tex_upload_now(GLuint t, int level, uint32_t w, uint32_t h, int format, const void *px, uint32_t bytes) {
     glBindTexture(GL_TEXTURE_2D, t);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     if (format == GS_TEXFMT_RGBA8) {
@@ -446,12 +654,22 @@ static int tex_upload(GsTex handle, int level, uint32_t w, uint32_t h, int forma
         glCompressedTexImage2D(GL_TEXTURE_2D, level, ifmt, (GLsizei)w, (GLsizei)h, 0, (GLsizei)bytes, px);
     }
     free((void *)px);
-    return 1;
 }
 
-static void tex_destroy(GsTex tex) { GLuint t = (GLuint)tex; glDeleteTextures(1, &t); }
+static void tex_destroy(GsTex tex) {
+    GLuint t = (GLuint)tex;
+    if (sSplit) {
+        GlCmd c = {0};
+        c.op = GLQ_TEX_DESTROY;
+        c.id = (uint32_t)tex;
+        q_do(&c);
+        id_put((uint32_t)tex);
+        return;
+    }
+    glDeleteTextures(1, &t);
+}
 static int tex_slots_left(void) { return 1 << 20; }
-static GsTex white_tex(void) { return (GsTex)sWhite; }
+static GsTex white_tex(void) { return sSplit ? (GsTex)(TEX_SPECIAL | 4u << 16) : (GsTex)sWhite; }
 
 static void copies_create(void) {
     glGenTextures(1, &sDateCopy);
@@ -462,8 +680,9 @@ static void copies_create(void) {
     glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, GS_W * SCALE, GS_H * SCALE, 0, GL_RED, GL_UNSIGNED_BYTE, NULL);
 }
 
-static void scale_changed(void) {
+static void scale_changed_now(void *unused) {
     int i;
+    (void)unused;
     glFinish();
     for (i = 0; i < gsTargetCount; i++) {
         target_drop(i);
@@ -472,6 +691,11 @@ static void scale_changed(void) {
     glDeleteTextures(1, &sAuxCopy);
     sDateCopy = sAuxCopy = 0;
     copies_create();
+}
+
+/* (the render thread waits meanwhile: what is read here of its state, the targets' count and the scale, stays) */
+static void scale_changed(void) {
+    q_call(scale_changed_now, NULL);
 }
 
 /* ---- pipelines ---------------------------------------------------------------------------------- */
@@ -723,14 +947,18 @@ static void bind_target(int i, int clear) {
     }
 }
 
-void GsGl_Vsync(int on) { /* the settings window's "V-sync" */
+static void vsync_now(void *on) {
     if (sCtx != NULL) {
-        SDL_GL_SetSwapInterval(on != 0);
+        SDL_GL_SetSwapInterval(*(int *)on != 0);
     }
 }
 
+void GsGl_Vsync(int on) { /* the settings window's "V-sync" */
+    q_call(vsync_now, &on);
+}
+
 /* ---- init --------------------------------------------------------------------------------------- */
-static int gl_init(void) {
+static int gl_init_now(void) {
     static const uint32_t white = 0xFFFFFFFFu;
     int i;
 
@@ -887,10 +1115,10 @@ void GsGl_StripTextureFree(unsigned id) {
 }
 
 /* ---- the frame ---------------------------------------------------------------------------------- */
-static void frame_end(void) {
+static void frame_gl(GlFrame *F) {
     SDL_Event ev;
     int cur = -1, best = -1, i;
-    uint32_t n;
+    uint32_t n, dk = 0;
     struct { int32_t mode[4]; float misc[4]; float rect[4]; float orig[4]; float extra[4]; } fu, lastFu;
     uint64_t tEnd[4];
 
@@ -913,33 +1141,6 @@ static void frame_end(void) {
         }
         if (ev.type == SDL_EVENT_KEY_DOWN && !ev.key.repeat && ev.key.key == SDLK_F11) { GsDraw_FullscreenToggle(); }
     }
-    if (getenv("BT3_GS_VERBOSE") != NULL && gGsFrame % 30 == 0) {
-        fprintf(stderr, "gpu: frame %u: %u draws, %u vertices, %d targets, %d textures, %d pipelines, %u primitives of PS2-only passes dropped, %u native effects\n",
-                gGsFrame, gsDrawCount, gsVertCount + gsVuVertCount, gsTargetCount, gsTexCount, sPipeCount, gsSkipped, gsNative);
-    }
-    if (getenv("BT3_HUD_LOG") != NULL && gGsFrame % 30 == 0) {
-        extern unsigned gHudMarks[9], gHudPrims, gHudKept, gHudClear; /* gs_draw.c */
-        extern int gPortMenuMode;                                     /* headless.c */
-        const unsigned *m = gHudMarks;
-        fprintf(stderr, "hud: frame %u (%s): markers left %u right %u centre %u end %u by place %u long bars %u %u loading %u announcement %u; "
-                        "primitives after a side's marker %u, kept %u, of them 2D with alpha 0 %u\n",
-                gGsFrame, gPortMenuMode ? "menus" : "not the menus", m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8], gHudPrims, gHudKept, gHudClear);
-        memset(gHudMarks, 0, sizeof(gHudMarks));
-        gHudPrims = gHudKept = gHudClear = 0;
-    }
-    if (getenv("BT3_GPU_CUT") != NULL && (int)gGsFrame == atoi(getenv("BT3_GPU_CUT")) && strchr(getenv("BT3_GPU_CUT"), ':') != NULL) {
-        uint32_t c = (uint32_t)atoi(strchr(getenv("BT3_GPU_CUT"), ':') + 1);
-        fprintf(stderr, "cut: frame %u has %u draws, keeping %u\n", gGsFrame, gsDrawCount, c < gsDrawCount ? c : gsDrawCount);
-        if (c < gsDrawCount) { gsDrawCount = c; }
-    }
-    if (getenv("BT3_GPU_TAIL") != NULL && (int)gGsFrame == atoi(getenv("BT3_GPU_TAIL"))) {
-        uint32_t k;
-        for (k = gsDrawCount > 14 ? gsDrawCount - 14 : 0; k < gsDrawCount; k++) {
-            const GsDraw *d = &gsDraws[k];
-            fprintf(stderr, "tail: draw %u native %d target %d vu %d first %u count %u pipeline key %08x\n",
-                    k, d->native, d->target, d->vu, d->first, d->count, d->native ? 0 : sPipes[d->pipeline].key);
-        }
-    }
 
     tEnd[0] = SDL_GetTicksNS();
     if (sRing) { /* the next set, once the GPU is done with its last frame */
@@ -957,38 +1158,38 @@ static void frame_end(void) {
         sVaoVu = sSet[k].vaoVu;
         sIboVu = sSet[k].iboVu;
         sUboFrame = sSet[k].ubo;
-        if (gsVertCount != 0) {
+        if (F->vertCount != 0) {
             glBindBuffer(GL_ARRAY_BUFFER, sVboGs);
-            ring_write(GL_ARRAY_BUFFER, gsVerts, gsVertCount * sizeof(Vtx));
+            ring_write(GL_ARRAY_BUFFER, F->verts, F->vertCount * sizeof(Vtx));
         }
-        if (gsVuVertCount != 0) {
+        if (F->vuVertCount != 0) {
             glBindBuffer(GL_ARRAY_BUFFER, sVboVu);
-            ring_write(GL_ARRAY_BUFFER, gsVuVerts, gsVuVertCount * 48);
+            ring_write(GL_ARRAY_BUFFER, F->vuVerts, F->vuVertCount * 48);
         }
-        if (gsVuIdxCount != 0) {
+        if (F->vuIdxCount != 0) {
             glBindVertexArray(sVaoVu);
-            ring_write(GL_ELEMENT_ARRAY_BUFFER, gsVuIdx, gsVuIdxCount * sizeof(uint32_t));
+            ring_write(GL_ELEMENT_ARRAY_BUFFER, F->vuIdx, F->vuIdxCount * sizeof(uint32_t));
             glBindVertexArray(0);
         }
     }
     /* (new storage of the frame's size each time, data and all, rather than writing over the buffer the previous
        frame's draws may still be reading: the driver need not wait for them or copy) */
-    if (!sRing && gsVertCount != 0) {
+    if (!sRing && F->vertCount != 0) {
         glBindBuffer(GL_ARRAY_BUFFER, sVboGs);
-        glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(gsVertCount * sizeof(Vtx)), gsVerts, GL_STREAM_DRAW);
+        glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(F->vertCount * sizeof(Vtx)), F->verts, GL_STREAM_DRAW);
     }
-    if (!sRing && gsVuVertCount != 0) {
+    if (!sRing && F->vuVertCount != 0) {
         glBindBuffer(GL_ARRAY_BUFFER, sVboVu);
-        glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(gsVuVertCount * 48), gsVuVerts, GL_STREAM_DRAW);
+        glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(F->vuVertCount * 48), F->vuVerts, GL_STREAM_DRAW);
     }
-    if (!sRing && gsVuIdxCount != 0) {
+    if (!sRing && F->vuIdxCount != 0) {
         glBindVertexArray(sVaoVu);
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr)(gsVuIdxCount * sizeof(uint32_t)), gsVuIdx, GL_STREAM_DRAW);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr)(F->vuIdxCount * sizeof(uint32_t)), F->vuIdx, GL_STREAM_DRAW);
         glBindVertexArray(0);
     }
     /* the uniform blocks of every draw (see stage_put): equal ones in a row once */
-    if (sOffCap < gsDrawCount) {
-        sOffCap = gsDrawCount + 1024;
+    if (sOffCap < F->drawCount) {
+        sOffCap = F->drawCount + 1024;
         sParOff = realloc(sParOff, sOffCap * sizeof(*sParOff));
         sUOff = realloc(sUOff, sOffCap * sizeof(*sUOff));
     }
@@ -996,8 +1197,8 @@ static void frame_end(void) {
     {
         uint32_t lastPar = 0, lastU = 0;
         int haveLast = 0, haveLastU = 0, lastUni = -1;
-        for (n = 0; n < gsDrawCount; n++) {
-            const GsDraw *d = &gsDraws[n];
+        for (n = 0; n < F->drawCount; n++) {
+            const GsDraw *d = &F->draws[n];
             if (d->native >= 100 || d->native == 5 || d->native == 4) {
                 continue;
             }
@@ -1023,7 +1224,7 @@ static void frame_end(void) {
             memcpy(fu.misc, d->misc, sizeof(fu.misc));
             memcpy(fu.rect, d->rect, sizeof(fu.rect));
             memcpy(fu.orig, d->orig, sizeof(fu.orig));
-            fu.extra[0] = d->vu ? (gsVuUni[d->uniform].misc[2] > 0.0f ? gsVuUni[d->uniform].misc[2] : 0.0f) : gsZMax;
+            fu.extra[0] = d->vu ? (F->vuUni[d->uniform].misc[2] > 0.0f ? F->vuUni[d->uniform].misc[2] : 0.0f) : F->zmax;
             fu.extra[1] = (sPipes[d->pipeline].key & (1u << 9)) ? 1.0f : 0.0f; /* the source scaled by its alpha */
             if (!haveLast || memcmp(&fu, &lastFu, sizeof(fu)) != 0) {
                 lastPar = stage_put(&fu, sizeof(fu));
@@ -1033,7 +1234,7 @@ static void frame_end(void) {
             sParOff[n] = lastPar;
             if (d->vu) {
                 if (!haveLastU || lastUni != (int)d->uniform) {
-                    lastU = stage_put(&gsVuUni[d->uniform], sizeof(Vu0Uniform));
+                    lastU = stage_put(&F->vuUni[d->uniform], sizeof(Vu0Uniform));
                     lastUni = (int)d->uniform;
                     haveLastU = 1;
                 }
@@ -1054,9 +1255,8 @@ static void frame_end(void) {
     }
     sRanged[0] = sRanged[1] = 0;
     tEnd[1] = SDL_GetTicksNS();
-    for (i = 0; i < 2; i++) {
-        uint32_t *px, fbp = i ? 0x70 : 0;
-        if (!(gGsFbUploads & (1u << i))) { continue; }
+    for (i = 0; i < 2; i++) { /* the movies' pictures, read out of GS memory at the hand-over (frame_end) */
+        if (F->fbPx[i] == NULL) { continue; }
         if (sFbTex[i] == 0) {
             glGenTextures(1, &sFbTex[i]);
             glBindTexture(GL_TEXTURE_2D, sFbTex[i]);
@@ -1065,13 +1265,11 @@ static void frame_end(void) {
             glBindFramebuffer(GL_FRAMEBUFFER, sFbFbo[i]);
             glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, sFbTex[i], 0);
         }
-        px = malloc((size_t)GS_W * GS_H * 4);
-        Gs_FrameRead32(fbp * 32, 8, GS_W, GS_H, px);
         glBindTexture(GL_TEXTURE_2D, sFbTex[i]);
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, GS_W, GS_H, GL_RGBA, GL_UNSIGNED_BYTE, px);
-        free(px);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, GS_W, GS_H, GL_RGBA, GL_UNSIGNED_BYTE, F->fbPx[i]);
+        free(F->fbPx[i]);
+        F->fbPx[i] = NULL;
     }
-    gGsFbUploads = 0;
 
     glBindVertexArray(sVaoGs);
     sCurPipe = -1;
@@ -1084,8 +1282,8 @@ static void frame_end(void) {
        back on for the frame's own draws, or every partial scissor (the split screen's halves, the HUD, the
        fighters' shadows) is ignored and the two views overlap across the whole screen. */
     glEnable(GL_SCISSOR_TEST);
-    for (n = 0; n < gsDrawCount; n++) {
-        const GsDraw *d = &gsDraws[n];
+    for (n = 0; n < F->drawCount; n++) {
+        const GsDraw *d = &F->draws[n];
         int shadowStart;
         if (d->native >= 100) {
             GLenum one[1] = {GL_COLOR_ATTACHMENT0};
@@ -1097,7 +1295,7 @@ static void frame_end(void) {
             glBlitFramebuffer(0, 0, GS_W, GS_H, 0, 0, GS_W * SCALE, GS_H * SCALE, GL_COLOR_BUFFER_BIT, GL_LINEAR);
             glEnable(GL_SCISSOR_TEST);
             haveScissor = 0;
-            gsTargets[d->target].cleared = 1;
+            F->targets[d->target].cleared = 1;
             cur = -1;
             continue;
         }
@@ -1105,9 +1303,13 @@ static void frame_end(void) {
             GLuint dst = d->native == 5 ? sDateCopy : sAuxCopy;
             GLenum one[1] = {GL_COLOR_ATTACHMENT0};
             int rx = 0, ry = 0, rw = GS_W * SCALE, rh = GS_H * SCALE;
-            if (!gsTargets[d->target].cleared) { continue; }
+            const int *date = d->native == 5 ? &F->date[5 * dk++] : NULL; /* (worked out at the hand-over, frame_end) */
+            if (!F->targets[d->target].cleared) { continue; }
             /* the DATE copy: only what the draws that follow read (gs_draw.c); rows as in the Vulkan back end */
-            if (d->native == 5 && !GsDraw_DateRegion(n, &rx, &ry, &rw, &rh)) { continue; }
+            if (date != NULL) {
+                if (!date[0]) { continue; }
+                rx = date[1]; ry = date[2]; rw = date[3]; rh = date[4];
+            }
             /* The copy of the frame's alpha ids (the outline and the DATE passes read it). glBlitFramebuffer is
                clipped by the scissor test, so with a partial scissor in force (the split screen's halves) only
                part of the alpha would be copied and the outline would draw a stale silhouette; turn it off for
@@ -1129,10 +1331,10 @@ static void frame_end(void) {
         }
         if (d->native == 3) {
             float params[4] = {(float)d->src, d->misc[0], 0.0f, 0.0f};
-            if (!gsTargets[d->target].cleared) { continue; }
+            if (!F->targets[d->target].cleared) { continue; }
             if (cur != d->target) { bind_target(d->target, 0); cur = d->target; }
             set_pipe(d->pipeline);
-            set_textures(sTgDep[d->target], 6, sAuxCopy, 6, (GLuint)d->tex, 6);
+            set_textures(sTgDep[d->target], 6, sAuxCopy, 6, tex_name(d->tex), 6);
             (void)params;
             bind_frame_range(1, sParOff[n], 80);
             if (d->blendc != lastBlendc) { glBlendColor(d->blendc, d->blendc, d->blendc, d->blendc); lastBlendc = d->blendc; }
@@ -1142,7 +1344,7 @@ static void frame_end(void) {
         }
         if (d->native) {
             float params[4];
-            if (!gsTargets[d->target].cleared) { continue; }
+            if (!F->targets[d->target].cleared) { continue; }
             if (cur != d->target) { bind_target(d->target, 0); cur = d->target; }
             set_native(d->native);
             set_textures(sAuxCopy, 6, 0, 6, 0, 6);
@@ -1159,16 +1361,16 @@ static void frame_end(void) {
         }
         /* an ordinary primitive */
         shadowStart = sPipes[d->pipeline].shadow &&
-            (n == 0 || gsDraws[n - 1].native || gsDraws[n - 1].target != d->target ||
-             !sPipes[gsDraws[n - 1].pipeline].shadow);
+            (n == 0 || F->draws[n - 1].native || F->draws[n - 1].target != d->target ||
+             !sPipes[F->draws[n - 1].pipeline].shadow);
         if (cur != d->target) {
-            bind_target(d->target, !gsTargets[d->target].cleared);
-            gsTargets[d->target].cleared = 1;
+            bind_target(d->target, !F->targets[d->target].cleared);
+            F->targets[d->target].cleared = 1;
             cur = d->target;
             sCurPipe = -1;
             haveScissor = 0;
-        } else if (!gsTargets[d->target].cleared) {
-            gsTargets[d->target].cleared = 1;
+        } else if (!F->targets[d->target].cleared) {
+            F->targets[d->target].cleared = 1;
         }
         if (shadowStart) {
             /* One bit per pixel blocks every later triangle of this flat-shadow run. */
@@ -1183,7 +1385,7 @@ static void frame_end(void) {
         glBindVertexArray(d->vu ? sVaoVu : sVaoGs);
         if (d->vu) { bind_frame_range(0, sUOff[n], sizeof(Vu0Uniform)); }
         bind_frame_range(1, sParOff[n], sizeof(fu));
-        set_textures((GLuint)d->tex, d->sampler, sDateCopy, 6, 0, 6);
+        set_textures(tex_name(d->tex), d->sampler, sDateCopy, 6, 0, 6);
         if (d->blendc != lastBlendc) { glBlendColor(d->blendc, d->blendc, d->blendc, d->blendc); lastBlendc = d->blendc; }
         set_scissor(d->scissor);
         if (d->vu) {
@@ -1198,8 +1400,8 @@ static void frame_end(void) {
         sSet[sRingAt].fence = pglFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
     }
     if (getenv("BT3_GS_VERBOSE") != NULL) { /* draws that could have been one with the draw before (the same state, the next vertices) */
-        for (n = 1; n < gsDrawCount; n++) {
-            const GsDraw *d = &gsDraws[n], *e = &gsDraws[n - 1];
+        for (n = 1; n < F->drawCount; n++) {
+            const GsDraw *d = &F->draws[n], *e = &F->draws[n - 1];
             sDrawsAll++;
             if (!d->native && !e->native && !d->vu && !e->vu && d->pipeline == e->pipeline && d->target == e->target &&
                 d->tex == e->tex && d->sampler == e->sampler && d->blendc == e->blendc && sParOff[n] == sParOff[n - 1] &&
@@ -1210,8 +1412,7 @@ static void frame_end(void) {
         }
     }
     /* the shown buffer: the one sceGsSwapDBuff set up for this frame, else the first target */
-    best = gGsMainFbp >= 0 ? GsDraw_TargetGet((uint32_t)gGsMainFbp, 0) : -1;
-    for (i = 0; best < 0 && i < gsTargetCount; i++) { best = i; }
+    best = F->best;
     glBindVertexArray(0);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glDisable(GL_STENCIL_TEST);
@@ -1224,7 +1425,7 @@ static void frame_end(void) {
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
         glEnable(GL_SCISSOR_TEST);
-        if (best >= 0 && gsTargets[best].cleared) {
+        if (best >= 0 && F->targets[best].cleared) {
             extern int Port_PageAspectMilli(void); /* plat_stub.c: 4:3 while the menus run, if asked for */
             float want = (float)Port_PageAspectMilli() / 1000.0f;
             int w = sw, h = sh, dx, dy;
@@ -1263,7 +1464,7 @@ static void frame_end(void) {
         }
     }
     /* BT3_GL_WINSHOT=<n>: dump the window's own framebuffer every n frames (what the user sees) */
-    if (getenv("BT3_GL_WINSHOT") != NULL && atoi(getenv("BT3_GL_WINSHOT")) > 0 && (int)gGsFrame % atoi(getenv("BT3_GL_WINSHOT")) == 0) {
+    if (getenv("BT3_GL_WINSHOT") != NULL && atoi(getenv("BT3_GL_WINSHOT")) > 0 && (int)F->frame % atoi(getenv("BT3_GL_WINSHOT")) == 0) {
         int sw, sh, x, y;
         uint8_t *wp;
         char nm[64];
@@ -1275,7 +1476,7 @@ static void frame_end(void) {
         glPixelStorei(GL_PACK_ALIGNMENT, 1);
         glReadPixels(0, 0, sw, sh, GL_RGBA, GL_UNSIGNED_BYTE, wp);
         glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-        snprintf(nm, sizeof(nm), "port/build/shots/window_%05u.ppm", gGsFrame);
+        snprintf(nm, sizeof(nm), "port/build/shots/window_%05u.ppm", F->frame);
         wf = fopen(nm, "wb");
         if (wf != NULL) {
             fprintf(wf, "P6\n%d %d\n255\n", sw, sh);
@@ -1301,11 +1502,12 @@ static void frame_end(void) {
             if (getenv("BT3_GS_VERBOSE") != NULL) {
                 fprintf(stderr, "time:   of ending the frame (GL): uploads %.2f ms (of it waiting for the GPU %.2f), issuing the draws %.2f, "
                                 "the picture and the overlay %.2f, swapping (the driver, the screen) %.2f; %u KB of uniform blocks; "
-                                "%u of %u draws could be joined with the one before%s\n",
+                                "%u of %u draws could be joined with the one before%s; the GL thread waited for work %.1f ms per frame\n",
                         (double)sum[0] / 60e6, (double)sGpuWaitNs / 60e6, (double)sum[1] / 60e6, (double)sum[2] / 60e6,
                         (double)sum[3] / 60e6, (unsigned)(sStageUsed >> 10), sDrawsJoinable, sDrawsAll,
-                        sRing ? "; buffers in turn" : "");
+                        sRing ? "; buffers in turn" : "", (double)sGlIdleNs / 60e6);
                 sGpuWaitNs = 0;
+                sGlIdleNs = 0;
                 sDrawsAll = sDrawsJoinable = 0;
             }
             count = 0;
@@ -1322,9 +1524,9 @@ static void frame_end(void) {
     {
         static int every = -1;
         if (every < 0) { every = getenv("BT3_SHOT") != NULL ? atoi(getenv("BT3_SHOT")) : 0; }
-        if (every > 0 && gGsFrame % (unsigned)every == 0 && best >= 0 && gsTargets[best].cleared &&
-            (getenv("BT3_SHOT_FROM") == NULL || (int)gGsFrame >= atoi(getenv("BT3_SHOT_FROM"))) &&
-            (getenv("BT3_SHOT_TO") == NULL || (int)gGsFrame <= atoi(getenv("BT3_SHOT_TO")))) {
+        if (every > 0 && F->frame % (unsigned)every == 0 && best >= 0 && F->targets[best].cleared &&
+            (getenv("BT3_SHOT_FROM") == NULL || (int)F->frame >= atoi(getenv("BT3_SHOT_FROM"))) &&
+            (getenv("BT3_SHOT_TO") == NULL || (int)F->frame <= atoi(getenv("BT3_SHOT_TO")))) {
             GLsizei w = 512 * SCALE, h = 448 * SCALE;
             int aux = getenv("BT3_SHOT_AUX") != NULL;
             uint8_t *px = malloc((size_t)w * h * 4);
@@ -1335,7 +1537,7 @@ static void frame_end(void) {
             glPixelStorei(GL_PACK_ALIGNMENT, 1);
             glReadPixels(0, 0, w, h, aux ? GL_RED : GL_RGBA, GL_UNSIGNED_BYTE, px);
             glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-            snprintf(name, sizeof(name), "port/build/shots/gpu_%05u.ppm", gGsFrame);
+            snprintf(name, sizeof(name), "port/build/shots/gpu_%05u.ppm", F->frame);
             fp = fopen(name, "wb");
             if (fp != NULL) {
                 fprintf(fp, "P6\n%d %d\n255\n", w, h);
@@ -1356,19 +1558,10 @@ static void frame_end(void) {
         }
     }
 
-    for (i = 0; i < gsTargetCount; i++) { gsTargets[i].draws = 0; }
-    gsVertCount = 0;
-    gsVuVertCount = 0;
-    gsVuIdxCount = 0;
-    gsVuUniCount = 0;
-    gsDrawCount = 0;
-    gsAnchor = 0;
-    gsSkipped = 0;
-    gsNative = 0;
 }
 
 /* Target i's picture, reduced to the GS's 512 x 448 (as the Vulkan back end's). */
-static int gl_target_read(int i, uint8_t *rgba) {
+static int gl_target_read_now(int i, uint8_t *rgba) {
     GLsizei w = 512 * SCALE, h = 448 * SCALE; /* (the picture's part of the target, as the screenshot's) */
     uint8_t *px;
     int x, y;
@@ -1390,7 +1583,7 @@ static int gl_target_read(int i, uint8_t *rgba) {
     return 1;
 }
 
-static void gl_target_copy(int src, int dst) {
+static void gl_target_copy_now(int src, int dst) {
     GLenum one[1] = {GL_COLOR_ATTACHMENT0};
     if (sTgCol[src] == 0 || sTgCol[dst] == 0) {
         return;
@@ -1405,6 +1598,295 @@ static void gl_target_copy(int src, int dst) {
     glBlitFramebuffer(0, 0, GS_W * SCALE, GS_H * SCALE, 0, 0, GS_W * SCALE, GS_H * SCALE, GL_COLOR_BUFFER_BIT, GL_NEAREST);
     glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+}
+
+
+/* ---- the GL thread's side ---------------------------------------------------------------------------------- */
+typedef struct { int i, ok; uint8_t *rgba; } ReadArgs;
+static void target_read_call(void *a) {
+    ReadArgs *r = a;
+    r->ok = gl_target_read_now(r->i, r->rgba);
+}
+
+static int gl_target_read(int i, uint8_t *rgba) {
+    ReadArgs r = {i, 0, rgba};
+    q_call(target_read_call, &r);
+    return r.ok;
+}
+
+static void target_copy_call(void *a) {
+    const int *ij = a;
+    gl_target_copy_now(ij[0], ij[1]);
+}
+
+static void gl_target_copy(int src, int dst) {
+    int ij[2] = {src, dst};
+    q_call(target_copy_call, ij);
+}
+
+static void gl_run(GlCmd *c) {
+    switch (c->op) {
+    case GLQ_TEX_CREATE: name_set(c->id, tex_create_now(c->level)); break;
+    case GLQ_TEX_UPLOAD: tex_upload_now(c->id < sNamesCap ? sNames[c->id] : 0, c->level, c->w, c->h, c->format, c->px, c->bytes); break;
+    case GLQ_TEX_DESTROY:
+        if (c->id < sNamesCap && sNames[c->id] != 0) {
+            glDeleteTextures(1, &sNames[c->id]);
+            sNames[c->id] = 0;
+        }
+        break;
+    case GLQ_TARGET_ENSURE: target_ensure_now((int)c->id); break;
+    case GLQ_TARGET_DROP: target_drop_now((int)c->id); break;
+    case GLQ_FRAME: frame_gl((GlFrame *)c->arg); break;
+    case GLQ_CALL: c->fn(c->arg); break;
+    }
+}
+
+static void *gl_thread(void *arg) {
+    extern void PortInput_Pump(void); /* gs_input.c: the window's events, the window being this thread's */
+    (void)arg;
+#ifdef __SWITCH__
+    {   /* the render thread's old core; the render thread goes to core 2 (gs_core.c) */
+        extern void Port_NxThreadCore(int core);
+        extern void Port_ProfileThread(void); /* plat_mem.c: this thread is the one sampled as "the render thread" */
+        Port_NxThreadCore(1);
+        Port_ProfileThread();
+    }
+#endif
+    pthread_mutex_lock(&sQLock); /* (held by gl_init until sGlThread is set) */
+    for (;;) {
+        size_t n, k, cap;
+        GlCmd *q;
+        uint64_t t0 = SDL_GetTicksNS();
+        while (sQCount == 0 && !sQStop) {
+            struct timespec until;
+            clock_gettime(CLOCK_REALTIME, &until);
+            until.tv_nsec += 1000000;
+            if (until.tv_nsec >= 1000000000) {
+                until.tv_nsec -= 1000000000;
+                until.tv_sec++;
+            }
+            if (pthread_cond_timedwait(&sQWake, &sQLock, &until) != 0 && sQCount == 0 && !sQStop && sCtx != NULL) {
+                pthread_mutex_unlock(&sQLock);
+                PortInput_Pump();
+                pthread_mutex_lock(&sQLock);
+            }
+        }
+        sGlIdleNs += SDL_GetTicksNS() - t0;
+        if (sQCount == 0) {
+            break;
+        }
+        q = sQRun; /* the commands taken, the other array for the next ones */
+        cap = sQRunCap;
+        sQRun = sQ;
+        sQRunCap = sQCap;
+        sQ = q;
+        sQCap = cap;
+        n = sQCount;
+        sQCount = 0;
+        sQBusy = 1;
+        pthread_mutex_unlock(&sQLock);
+        for (k = 0; k < n; k++) {
+            gl_run(&sQRun[k]);
+            if (sQRun[k].op == GLQ_FRAME) {
+                pthread_mutex_lock(&sQLock);
+                sQFrames--;
+                pthread_cond_broadcast(&sQIdle);
+                pthread_mutex_unlock(&sQLock);
+            }
+        }
+        pthread_mutex_lock(&sQLock);
+        sQBusy = 0;
+        pthread_cond_broadcast(&sQIdle);
+    }
+    pthread_mutex_unlock(&sQLock);
+    return NULL;
+}
+
+static int split_wanted(void) {
+#ifdef __SWITCH__
+    int want = 1;
+#else
+    int want = 0;
+#endif
+    if (getenv("BT3_GL_THREAD") != NULL) {
+        want = atoi(getenv("BT3_GL_THREAD")) != 0;
+    }
+    return want;
+}
+
+static void init_call(void *ok) {
+    *(int *)ok = gl_init_now();
+}
+
+static int gl_init(void) {
+    pthread_attr_t attr;
+    int ok = 0;
+    if (!split_wanted()) {
+        return gl_init_now();
+    }
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, 8u << 20); /* (as the render thread's: Mesa's calls are deep) */
+    pthread_mutex_lock(&sQLock);
+    sSplit = pthread_create(&sGlThread, &attr, gl_thread, NULL) == 0;
+    pthread_mutex_unlock(&sQLock);
+    pthread_attr_destroy(&attr);
+    if (!sSplit) {
+        return gl_init_now();
+    }
+    q_call(init_call, &ok);
+    fprintf(stderr, "bt3: gl: the OpenGL calls on a thread of their own (BT3_GL_THREAD=0: on the render thread)\n");
+    return ok;
+}
+
+int GsGl_Split(void) {
+    return sSplit;
+}
+
+int GsGl_OnThread(void) {
+    return on_gl_thread();
+}
+
+/* Before the scale changes (gs_draw.c, scale_apply): the frame being drawn is drawn at the scale it was recorded at. */
+void GsGl_Drain(void) {
+    q_drain();
+}
+
+/* At the program's end (gs_core.c, render_stop), once the render thread has stopped. */
+void GsGl_Stop(void) {
+    if (!queued()) {
+        return;
+    }
+    q_drain();
+    pthread_mutex_lock(&sQLock);
+    sQStop = 1;
+    pthread_cond_broadcast(&sQWake);
+    pthread_mutex_unlock(&sQLock);
+    pthread_join(sGlThread, NULL);
+}
+
+/* The back end's frameEnd, on the thread that records (the render thread): the frame is handed to frame_gl, here
+   or (sSplit) on the GL thread, and the counters are cleared for the next one. What frame_gl would otherwise read of
+   the recorder's state is taken here: the target shown, the DATE copies' regions, a movie's picture out of GS memory. */
+static void frame_end(void) {
+    static GlFrame frames[2];
+    static int at, fbMade[2];
+    GlFrame *F = &frames[sSplit ? at : 0];
+    uint32_t n, nd = 0;
+    int i;
+
+    if (getenv("BT3_GS_VERBOSE") != NULL && gGsFrame % 30 == 0) {
+        fprintf(stderr, "gpu: frame %u: %u draws, %u vertices, %d targets, %d textures, %d pipelines, %u primitives of PS2-only passes dropped, %u native effects\n",
+                gGsFrame, gsDrawCount, gsVertCount + gsVuVertCount, gsTargetCount, gsTexCount, sPipeCount, gsSkipped, gsNative);
+    }
+    if (getenv("BT3_HUD_LOG") != NULL && gGsFrame % 30 == 0) {
+        extern unsigned gHudMarks[9], gHudPrims, gHudKept, gHudClear; /* gs_draw.c */
+        extern int gPortMenuMode;                                     /* headless.c */
+        const unsigned *m = gHudMarks;
+        fprintf(stderr, "hud: frame %u (%s): markers left %u right %u centre %u end %u by place %u long bars %u %u loading %u announcement %u; "
+                        "primitives after a side's marker %u, kept %u, of them 2D with alpha 0 %u\n",
+                gGsFrame, gPortMenuMode ? "menus" : "not the menus", m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8], gHudPrims, gHudKept, gHudClear);
+        memset(gHudMarks, 0, sizeof(gHudMarks));
+        gHudPrims = gHudKept = gHudClear = 0;
+    }
+    if (getenv("BT3_GPU_CUT") != NULL && (int)gGsFrame == atoi(getenv("BT3_GPU_CUT")) && strchr(getenv("BT3_GPU_CUT"), ':') != NULL) {
+        uint32_t c = (uint32_t)atoi(strchr(getenv("BT3_GPU_CUT"), ':') + 1);
+        fprintf(stderr, "cut: frame %u has %u draws, keeping %u\n", gGsFrame, gsDrawCount, c < gsDrawCount ? c : gsDrawCount);
+        if (c < gsDrawCount) { gsDrawCount = c; }
+    }
+    if (getenv("BT3_GPU_TAIL") != NULL && (int)gGsFrame == atoi(getenv("BT3_GPU_TAIL"))) {
+        uint32_t k;
+        for (k = gsDrawCount > 14 ? gsDrawCount - 14 : 0; k < gsDrawCount; k++) {
+            const GsDraw *d = &gsDraws[k];
+            fprintf(stderr, "tail: draw %u native %d target %d vu %d first %u count %u pipeline key %08x\n",
+                    k, d->native, d->target, d->vu, d->first, d->count, d->native ? 0 : sPipes[d->pipeline].key);
+        }
+    }
+
+    F->best = gGsMainFbp >= 0 ? GsDraw_TargetGet((uint32_t)gGsMainFbp, 0) : -1;
+    for (i = 0; F->best < 0 && i < gsTargetCount; i++) { F->best = i; }
+    for (n = 0; n < gsDrawCount; n++) {
+        if (gsDraws[n].native == 5) {
+            int *r;
+            if (5 * (nd + 1) > F->dateCap) {
+                F->dateCap = 5 * (nd + 1) * 2;
+                F->date = realloc(F->date, F->dateCap * sizeof(*F->date));
+            }
+            r = &F->date[5 * nd++];
+            r[1] = r[2] = 0;
+            r[3] = GS_W * SCALE;
+            r[4] = GS_H * SCALE;
+            r[0] = GsDraw_DateRegion(n, &r[1], &r[2], &r[3], &r[4]);
+        }
+    }
+    for (i = 0; i < 2; i++) {
+        F->fbPx[i] = NULL;
+        if (gGsFbUploads & (1u << i)) {
+            F->fbPx[i] = malloc((size_t)GS_W * GS_H * 4);
+            Gs_FrameRead32((i ? 0x70u : 0u) * 32, 8, GS_W, GS_H, F->fbPx[i]);
+            fbMade[i] = 1;
+        }
+    }
+    gGsFbUploads = 0;
+    F->zmax = gsZMax;
+    F->frame = gGsFrame;
+    F->draws = gsDraws;
+    F->verts = gsVerts;
+    F->vuVerts = gsVuVerts;
+    F->vuIdx = gsVuIdx;
+    F->vuUni = gsVuUni;
+    F->drawCount = gsDrawCount;
+    F->vertCount = gsVertCount;
+    F->vuVertCount = gsVuVertCount;
+    F->vuIdxCount = gsVuIdxCount;
+    if (!sSplit) {
+        F->targets = gsTargets;
+        frame_gl(F);
+    } else {
+        GlFrame *other = &frames[at ^ 1];
+        GlCmd c = {0};
+        /* the frame before has to be drawn: its arrays are the ones recorded into next */
+        pthread_mutex_lock(&sQLock);
+        while (sQFrames > 0) {
+            pthread_cond_wait(&sQIdle, &sQLock);
+        }
+        sQFrames++;
+        pthread_mutex_unlock(&sQLock);
+        memcpy(F->targetCopy, gsTargets, sizeof(F->targetCopy));
+        F->targets = F->targetCopy;
+        if (other->draws == NULL) { /* (the second set, at the first hand-over) */
+            other->verts = malloc(MAX_VERTS * sizeof(Vtx));
+            other->vuVerts = malloc(MAX_VU_VERTS * 48);
+            other->vuIdx = malloc(MAX_VU_IDX * sizeof(uint32_t));
+            other->vuUni = malloc(MAX_VU_UNIFORMS * sizeof(Vu0Uniform));
+            other->draws = malloc(MAX_DRAWS * sizeof(GsDraw));
+        }
+        gsDraws = other->draws;
+        gsVerts = other->verts;
+        gsVuVerts = other->vuVerts;
+        gsVuIdx = other->vuIdx;
+        gsVuUni = other->vuUni;
+        /* the targets as frame_gl leaves its copy: a draw into one marks it as holding a picture */
+        for (n = 0; n < F->drawCount; n++) {
+            const GsDraw *d = &F->draws[n];
+            if (d->native >= 100 ? fbMade[d->native - 100] : d->native == 0) {
+                gsTargets[d->target].cleared = 1;
+            }
+        }
+        id_release_later();
+        at ^= 1;
+        c.op = GLQ_FRAME;
+        c.arg = F;
+        q_put(&c);
+    }
+    for (i = 0; i < gsTargetCount; i++) { gsTargets[i].draws = 0; }
+    gsVertCount = 0;
+    gsVuVertCount = 0;
+    gsVuIdxCount = 0;
+    gsVuUniCount = 0;
+    gsDrawCount = 0;
+    gsAnchor = 0;
+    gsSkipped = 0;
+    gsNative = 0;
 }
 
 GsBackend sGlBackend = {

@@ -1281,6 +1281,7 @@ static void race_compare(void) {
 
 static void *render_thread(void *arg) {
     extern void PortInput_Pump(void); /* gs_input.c */
+    extern int GsGl_Split(void);      /* gs_gl.c: the GL thread pumps the window's events then */
     (void)arg;
 #ifdef __SWITCH__
     {   /* a core of its own: the game's thread is on core 0, the sound's on core 2 (plat_nxfs.c) */
@@ -1301,7 +1302,7 @@ static void *render_thread(void *arg) {
                 until.tv_nsec -= 1000000000;
                 until.tv_sec++;
             }
-            if (pthread_cond_timedwait(&sWake, &sLock, &until) != 0 && sJob == 0 && !sStopping && sGpu) {
+            if (pthread_cond_timedwait(&sWake, &sLock, &until) != 0 && sJob == 0 && !sStopping && sGpu && !GsGl_Split()) {
                 pthread_mutex_unlock(&sLock);
                 PortInput_Pump();
                 pthread_mutex_lock(&sLock);
@@ -1314,6 +1315,12 @@ static void *render_thread(void *arg) {
         gGsMainFbp = sJobFbp; /* the buffer as the game had set it for this job, not as it is by now */
         if (sJob == 1) {
             sInitResult = GsGpu_Init();
+#ifdef __SWITCH__
+            if (GsGl_Split()) { /* the GL thread took core 1: this thread's walk of the lists goes beside the sound, on 2 */
+                extern void Port_NxThreadCore(int core);
+                Port_NxThreadCore(getenv("BT3_RENDER_CORE") != NULL ? atoi(getenv("BT3_RENDER_CORE")) : 2);
+            }
+#endif
         } else if (sJob == 3) {
             extern int GsGpu_Snapshot(uint32_t fbp); /* gs_draw.c */
             sInitResult = GsGpu_Snapshot(sJobTadr); /* (Gs_StoreImage: the frame kept for the cross-fade) */
@@ -1358,7 +1365,11 @@ static void *render_thread(void *arg) {
 
 /* Blocks until the render thread has nothing to do. `site`: which wait it is (sWaitNs). */
 static void render_wait_at(int site) {
+    extern int GsGl_OnThread(void); /* gs_gl.c */
     uint64_t t0 = 0;
+    if (GsGl_OnThread()) {
+        return; /* (the GL thread does the render thread's OpenGL work: waiting for it there would never end) */
+    }
     pthread_mutex_lock(&sLock);
     if (sJob != 0) {
         t0 = now_ns();
@@ -1381,7 +1392,9 @@ static void render_wait(void) {
    its loop and is waited for, so that nothing it uses (the window, the device) is taken down under it. From the
    render thread itself (Esc in the window, the settings window's Quit) there is nothing to wait for. */
 static void render_stop(void) {
-    if (!sThreaded || pthread_equal(pthread_self(), sThread)) {
+    extern int GsGl_OnThread(void);
+    extern void GsGl_Stop(void);
+    if (!sThreaded || pthread_equal(pthread_self(), sThread) || GsGl_OnThread()) {
         return;
     }
     render_wait();
@@ -1390,6 +1403,7 @@ static void render_stop(void) {
     pthread_cond_broadcast(&sWake);
     pthread_mutex_unlock(&sLock);
     pthread_join(sThread, NULL);
+    GsGl_Stop(); /* (then the GL thread: the window and the context are its own) */
 }
 
 /* For the pad read (plat_stub.c), when the game has time to spare: returns once the list handed over last has been
@@ -1400,7 +1414,8 @@ static void render_stop(void) {
 void Gs_RenderListWait(void) {
     extern int GsDraw_SkippedRecently(void); /* gs_draw.c */
     uint64_t t0 = 0;
-    if (!sThreaded || pthread_equal(pthread_self(), sThread) || GsDraw_SkippedRecently()) {
+    extern int GsGl_OnThread(void);
+    if (!sThreaded || pthread_equal(pthread_self(), sThread) || GsGl_OnThread() || GsDraw_SkippedRecently()) {
         return; /* (ticks being left out: the drawing beside the game's work is needed, see GsDraw_SkippedRecently) */
     }
     pthread_mutex_lock(&sLock);

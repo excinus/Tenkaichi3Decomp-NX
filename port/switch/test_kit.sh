@@ -77,6 +77,10 @@ BT3_HUD_LOG=1
 #BT3_GL_RING=0
 # Mesa's error checks in every OpenGL call, off on the Switch since this kit: remove the # to have them back.
 #MESA_NO_ERROR=0
+# OpenGL's calls on the render thread itself, as in the kits before (no thread of their own): remove the # to compare.
+#BT3_GL_THREAD=0
+# The render thread's core with the GL thread (2, beside the sound; 0 is the game's): to try another, remove the #.
+#BT3_RENDER_CORE=0
 ENV
 cat > $K/README.txt <<'TXT'
 Tenkaichi3Decomp for the Nintendo Switch - test kit: the game (phase 4 of docs/port/switch_plan.md)

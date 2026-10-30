@@ -718,3 +718,18 @@ thread has nothing to do. Changed:
   `GsDraw_SkippedRecently`); its time is in the `BT3_GS_VERBOSE` line with the other waits.
 At 41 ms per drawn list and 5 per skipped one the render thread can show about 23 of the 30 ticks a second; 30 at the
 stock clock needs the list's walk (about 14 ms) off the thread that issues OpenGL's draws.
+
+The kit of commit 2f12352, the stock clock: 16 to 19 pictures a second (10 to 15 before). The fight's log: 35 of 60
+ticks drawn, the render thread 43 ms per drawn list (29 of it OpenGL's end of the frame) and 5 per skipped one, busy
+82% of the time: the render thread is what limits now; the game's thread waited 13 ms a frame for it (at the frame's
+end, in sceGsSwapDBuff's transfer), and no longer before the pad read. Saving checked: the "unlock everything"
+cheat's state, saved, survived a restart. Changed:
+- the GL thread (gs_gl.c, "the GL thread"; on the Switch by default, `BT3_GL_THREAD=0` in bt3_env.txt for the old
+  way): the context, the window and every OpenGL call are its own; the render thread walks the lists and records the
+  draws as before, and hands each frame over to it (the arrays of draws, vertices and uniform blocks in two sets in
+  turn, the targets' state copied), so that the walk of frame n + 1 goes on while frame n's draws are issued. The back
+  end's calls during the walk (textures made, filled, deleted; targets made, dropped) are queued in order, textures
+  named by ids of gs_gl.c's that the GL thread maps to its GL names; reading a target back or copying one waits for
+  the queue. The GL thread is on core 1, the render thread moves to core 2 (beside the sound; `BT3_RENDER_CORE`);
+  Smooth motion is off with it (its pictures swap the frame's arrays). `BT3_GS_VERBOSE`: how long the GL thread
+  waited for work per frame.
