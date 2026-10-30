@@ -2412,7 +2412,12 @@ static void build(void) {
         }
         if ((io.BackendFlags & ImGuiBackendFlags_HasGamepad) != 0) {
             ImGui::SameLine();
+#ifdef __SWITCH__
+            // (the Switch's names for the same places: SDL's south button, Cross, is the Switch's B, its east one A)
+            ImGui::TextDisabled("D-pad: move   B: choose   A: back   L / R: tab");
+#else
             ImGui::TextDisabled("D-pad: move   Cross / A: choose   Circle / B: back   L1 / R1: tab");
+#endif
         }
     }
     ImGui::End();

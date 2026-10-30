@@ -380,7 +380,7 @@ typedef struct Pipe { uint32_t key, bkey, wmask; int ztst, zwrite, topo, vu, fx,
 static Pipe sPipes[1024];
 static int sPipeCount;
 
-/* ---- the GL thread (BT3_GL_THREAD=0/1; on the Switch by default) ------------------------------------------------
+/* ---- the GL thread (BT3_GL_THREAD=1; off by default) ------------------------------------------------
  * The OpenGL driver's own work for a fight frame (Mesa's per-draw CPU work: 23 ms of draws at the Switch's stock clock,
  * 2026-10-30) and the walk of the frame's list that records the draws (14 ms there) were one thread's, 41 ms a drawn
  * frame against the 33 of a tick. With this thread the context is its own: the render thread (or the game's, without
@@ -1702,12 +1702,11 @@ static void *gl_thread(void *arg) {
     return NULL;
 }
 
+/* Off by default (2026-10-30): at the Switch's stock clock it gained 1 or 2 pictures a second, the frame's end then
+   waiting 25 ms for the screen's buffer (the GPU at its stock clock behind), and the pacing was less even, with a
+   frame more between a press and its picture; overclocked, a fight was already a clean 30 without it. */
 static int split_wanted(void) {
-#ifdef __SWITCH__
-    int want = 1;
-#else
     int want = 0;
-#endif
     if (getenv("BT3_GL_THREAD") != NULL) {
         want = atoi(getenv("BT3_GL_THREAD")) != 0;
     }
@@ -1734,7 +1733,7 @@ static int gl_init(void) {
         return gl_init_now();
     }
     q_call(init_call, &ok);
-    fprintf(stderr, "bt3: gl: the OpenGL calls on a thread of their own (BT3_GL_THREAD=0: on the render thread)\n");
+    fprintf(stderr, "bt3: gl: the OpenGL calls on a thread of their own (BT3_GL_THREAD=1)\n");
     return ok;
 }
 

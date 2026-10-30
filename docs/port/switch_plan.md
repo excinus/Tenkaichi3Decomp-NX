@@ -250,8 +250,8 @@ an `.nro` from the homebrew menu through a game (hold R): the same folder, no HO
 | 1. Spike on a console | Its report (`sdmc:/switch/bt3_spike.txt`) is in this file: the window maps, code runs at W + 0x20000000, the speed is known, every GL program compiles. **Done** (2026-10-29): three runs, two at the stock clock, all passed. |
 | 2. The game builds for the Switch | `BT3_CC=nx64` compiles and links the whole game with libnx (`BT3_SKELETON=1`), in CI. **Done** (2026-10-29): `port/build/bt3_nx`; stubs for SDL3 and four system calls. |
 | 3. The demo fight on a console | The launcher loads the game; the attract-demo fight runs without a picture and its `BT3_HASH` lines (written to the card) equal Linux's (`compare_hash.py`). **Done** (2026-10-29): "battle finished", the fight's values the same as the PC's on all 4242 blanks of fighting. |
-| 4. Playable | The platform layer: picture (GL), sound, controllers; the game plays from boot to a fight and saves. Built (2026-10-29): SDL3's Switch drivers, the game's folder as the PC release's (`package.py`). First start on a console: hangs after the language list (see "Results"). |
-| 5. The package | The setup's Switch mode, `Tenkaichi3Decomp-switch.zip` in the release workflow, the updater's Switch asset and its restart through the launcher. The `.nro` is the program to start (from the homebrew menu, or the HOME menu through a forwarder such as sphaira's); no NSP of its own ("The NSP"). |
+| 4. Playable | The platform layer: picture (GL), sound, controllers; the game plays from boot to a fight and saves. **Done** (2026-10-30), with the CPU overclocked to 1785 MHz (sys-clk), which is a requirement: there everything checked works (menus, fights at a clean 30, HUD and effects, movies, saving, added songs and stages); at the stock 1020 MHz fights reach 16 to 20 pictures a second, unevenly paced (see "Results"). |
+| 5. The package | This fork's own releases (not the original repository's, and no Switch mode in its setup): `Tenkaichi3Decomp-switch.zip` in this fork's release workflow, signed with this fork's key; the updater's Switch asset from this fork's releases and its restart through the launcher; a workflow that follows the original repository's releases (merges them, builds, publishes the same version for the Switch). The `.nro` is the program to start (from the homebrew menu, or the HOME menu through a forwarder such as sphaira's); no NSP of its own ("The NSP"). |
 | 6. Online | A lobby between a Switch and a PC, by code and by address. |
 
 Biggest risk: **speed**. The game's arithmetic is exact software float (the README asks for a recent mid-range PC
@@ -733,3 +733,16 @@ cheat's state, saved, survived a restart. Changed:
   the queue. The GL thread is on core 1, the render thread moves to core 2 (beside the sound; `BT3_RENDER_CORE`);
   Smooth motion is off with it (its pictures swap the frame's arrays). `BT3_GS_VERBOSE`: how long the GL thread
   waited for work per frame.
+
+The kit of commit 7a5e6bd (the GL thread), the stock clock: no crash, the sound right, 1 or 2 pictures a second more,
+the pacing again slightly uneven and some combos missed. The log: the render thread 34 to 37 ms per drawn list (19
+to 21 of it the hand-over, waiting for the GL thread); the GL thread waited for work only 3 to 7 ms a frame, its
+frame end now with 25 ms in "the picture and the overlay" (0.8 before), 40% of its time in svcWaitSynchronization
+from waitObjects: the present waiting for the screen's next buffer, which is the GPU (at its stock clock) not done
+with the one before. With the CPU's work split, the GPU is what limits at the stock clocks; the extra frame in the
+pipeline is a frame more between a press and its picture. Decided with the player: the overclock is a requirement
+(fights overclocked were a clean 30 in every kit). Changed:
+- the GL thread off by default (`BT3_GL_THREAD=1` to have it); the fixes before it (each job's shown buffer, no
+  wait before the pad read while ticks are skipped) stay;
+- the settings window's footer with the Switch's names: "B: choose   A: back   L / R: tab";
+- added songs and stages checked working on the Switch.

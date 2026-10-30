@@ -77,10 +77,9 @@ BT3_HUD_LOG=1
 #BT3_GL_RING=0
 # Mesa's error checks in every OpenGL call, off on the Switch since this kit: remove the # to have them back.
 #MESA_NO_ERROR=0
-# OpenGL's calls on the render thread itself, as in the kits before (no thread of their own): remove the # to compare.
-#BT3_GL_THREAD=0
-# The render thread's core with the GL thread (2, beside the sound; 0 is the game's): to try another, remove the #.
-#BT3_RENDER_CORE=0
+# OpenGL's calls on a thread of their own (the kit of 7a5e6bd; 1 or 2 pictures a second more at the stock clock,
+# a frame more of delay): remove the # to try it.
+#BT3_GL_THREAD=1
 ENV
 cat > $K/README.txt <<'TXT'
 Tenkaichi3Decomp for the Nintendo Switch - test kit: the game (phase 4 of docs/port/switch_plan.md)
@@ -90,6 +89,8 @@ before; what does not work yet is what this test is for.
 
 What you need: a Switch with Atmosphere, and your PC installation of Tenkaichi3Decomp (its gamedata folder, which
 its setup made from your disc). If you ran an earlier kit, the gamedata folder is already on the card.
+The CPU overclocked to 1785 MHz with sys-clk (a profile for the title the game runs as) is REQUIRED for full speed:
+fights at the stock 1020 MHz reach 16 to 20 pictures a second and their pacing is uneven.
 
 1. Copy this kit's folders to the root of the SD card: atmosphere/ and switch/ (they merge with what is there;
    replace the files of an earlier kit, bt3_env.txt included).
