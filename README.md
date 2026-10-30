@@ -56,7 +56,7 @@ Steps:
 4. *Optional, recommended:* put the game on the HOME menu with a forwarder made by
    [sphaira](https://github.com/NaGaa95/sphaira), so it starts like any other game.
 
-Without Windows: `Tenkaichi3Decomp-switch-SD.zip` and `INSTALL.txt` in it.
+Without Windows: `Tenkaichi3Decomp-switch.zip` and `INSTALL.txt` in it.
 
 ## Troubleshooting
 

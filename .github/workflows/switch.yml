@@ -82,7 +82,7 @@ jobs:
       - name: Test kit
         run: sh port/switch/test_kit.sh
 
-      # the Windows setup (port/switch/setup), with this build's SD zip in it
+      # the Windows setup (port/switch/setup), with this build's zip in it
       - name: Windows setup
         run: |
           apt-get install -y --no-install-recommends mingw-w64 cmake

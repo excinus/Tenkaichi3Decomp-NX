@@ -39,8 +39,8 @@ PC release folder. It is this fork's own release (excinus/Tenkaichi3Decomp-NX), 
 Switch mode in the PC setup, no NSP (see "Releases (phase 5)").
 
 1. **The release** (this fork's GitHub releases): `Tenkaichi3Decomp-switch-setup.exe`, the Windows setup ("The
-   setup", below); `Tenkaichi3Decomp-switch-SD.zip`, the SD card's layout, for a first install by hand, with
-   `INSTALL.txt`; and `Tenkaichi3Decomp-switch.zip` with its `.sig`, the game's folder, for the automatic update:
+   setup", below), and `Tenkaichi3Decomp-switch.zip` with its `.sig`: the SD card's layout, for a first install by
+   hand (with `INSTALL.txt`) and for the automatic update (which takes its game folder only):
 
    ```
    <SD>/atmosphere/contents/0100B73DEC000000/      the game's folder: the PC release folder, for the Switch

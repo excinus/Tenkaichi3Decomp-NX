@@ -423,7 +423,6 @@ def portable(out):
 
 NX_OUT = ROOT / "port/build/release-switch"
 NX_ZIP = ROOT / "port/build/Tenkaichi3Decomp-switch.zip"
-NX_SD_ZIP = ROOT / "port/build/Tenkaichi3Decomp-switch-SD.zip"
 
 NX_README = """Dragon Ball Z: Budokai Tenkaichi 3 - port for the Nintendo Switch (Atmosphere homebrew).
 
@@ -492,12 +491,11 @@ def main_nx():
     """BT3_CC=nx64: the game's folder for the Switch (docs/port/switch_plan.md), laid out as the PC release folder: the
     program (an ELF the launcher loads) with its lists (.dat, .mem, .rel), the screen reader's lines, translations,
     fonts, the online screens' pictures, the notes of textures/, songs/, stages/, README.txt, licenses/. It goes to
-    atmosphere/contents/0100B73DEC000000/ on the SD card; the zip is what the automatic update takes. With the
-    launcher built (port/switch/launcher/build.sh, before this), its copy launcher.nro is in it (the launcher takes it
-    from there), and a second zip has the SD card's whole layout for a first install (Tenkaichi3Decomp-switch-SD.zip:
-    atmosphere/, switch/Tenkaichi3Decomp.nro, pack_gamedata.py, INSTALL.txt; also what the Switch
-    setup carries, port/switch/setup). BT3_NX_LAUNCHER=1: an error without it
-    (a release)."""
+    atmosphere/contents/0100B73DEC000000/ on the SD card. With the launcher built (port/switch/launcher/build.sh, before
+    this), its copy launcher.nro is in it (the launcher takes it from there). The release's one zip,
+    Tenkaichi3Decomp-switch.zip, is the SD card's layout: that folder, switch/Tenkaichi3Decomp.nro, pack_gamedata.py and
+    INSTALL.txt (a first install by hand; what the Switch setup carries, port/switch/setup; and what the game's
+    automatic update installs, its game folder only). BT3_NX_LAUNCHER=1: an error without the launcher (a release)."""
     import toolchain
     exe = toolchain.EXE
     for need in (exe, pathlib.Path(str(exe) + ".rel")):
@@ -535,29 +533,22 @@ def main_nx():
     for kind, note in (("stages", STAGES_NOTE), ("songs", SONGS_NOTE)):
         (NX_OUT / kind).mkdir()
         (NX_OUT / kind / "README.txt").write_text(note)
+    # the release's one zip: the SD card's layout (a first install by hand, what the setup carries, and what the
+    # game's automatic update takes: only its atmosphere/contents/<title>/ part, gs/net_update.c)
     if NX_ZIP.exists():
         NX_ZIP.unlink()
     with zipfile.ZipFile(NX_ZIP, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
         for p in sorted(NX_OUT.rglob("*")):
             if p.is_file():
-                info = zipfile.ZipInfo.from_file(p, "Tenkaichi3Decomp/" + str(p.relative_to(NX_OUT)))
-                info.compress_type = zipfile.ZIP_DEFLATED
-                z.writestr(info, p.read_bytes(), compresslevel=9)
-    print(f"{NX_ZIP.relative_to(ROOT)}: {NX_ZIP.stat().st_size / 1e6:.1f} MB")
-    if NX_SD_ZIP.exists():
-        NX_SD_ZIP.unlink()
-    if launcher.exists():
-        with zipfile.ZipFile(NX_SD_ZIP, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
-            for p in sorted(NX_OUT.rglob("*")):
-                if p.is_file():
-                    z.writestr(zipfile.ZipInfo.from_file(p, "atmosphere/contents/0100B73DEC000000/" + str(p.relative_to(NX_OUT))),
-                               p.read_bytes(), compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
+                z.writestr(zipfile.ZipInfo.from_file(p, "atmosphere/contents/0100B73DEC000000/" + str(p.relative_to(NX_OUT))),
+                           p.read_bytes(), compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
+        if launcher.exists():
             z.writestr(zipfile.ZipInfo.from_file(launcher, "switch/Tenkaichi3Decomp.nro"), launcher.read_bytes(),
                        compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
-            pack = ROOT / "port/switch/pack_gamedata.py"
-            z.writestr(zipfile.ZipInfo.from_file(pack, "pack_gamedata.py"), pack.read_bytes(), compress_type=zipfile.ZIP_DEFLATED)
-            z.writestr("INSTALL.txt", NX_INSTALL.replace("\n", "\r\n"), compress_type=zipfile.ZIP_DEFLATED)
-        print(f"{NX_SD_ZIP.relative_to(ROOT)}: {NX_SD_ZIP.stat().st_size / 1e6:.1f} MB (the SD card's layout, for a first install)")
+        pack = ROOT / "port/switch/pack_gamedata.py"
+        z.writestr(zipfile.ZipInfo.from_file(pack, "pack_gamedata.py"), pack.read_bytes(), compress_type=zipfile.ZIP_DEFLATED)
+        z.writestr("INSTALL.txt", NX_INSTALL.replace("\n", "\r\n"), compress_type=zipfile.ZIP_DEFLATED)
+    print(f"{NX_ZIP.relative_to(ROOT)}: {NX_ZIP.stat().st_size / 1e6:.1f} MB (the SD card's layout)")
 
 if os.environ.get("BT3_CC") == "win64":
     main_win()

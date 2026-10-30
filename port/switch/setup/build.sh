@@ -7,7 +7,7 @@
 #   port/switch/setup/build.sh [<SD zip>]    -> port/build/Tenkaichi3Decomp-switch-setup        (this Linux, for tests)
 #
 # Needs cmake and the compiler; SDL's source is the one port/switch/sdl3/build.py downloads (port/build/nx/
-# SDL3-<version>.tar.gz), fetched here when it is missing. The zip: port/build/Tenkaichi3Decomp-switch-SD.zip
+# SDL3-<version>.tar.gz), fetched here when it is missing. The zip: port/build/Tenkaichi3Decomp-switch.zip
 # (BT3_CC=nx64 port/tools/package.py), followed by a trailer: "BT3NXSD1" and its size (8 bytes, little-endian).
 set -e
 cd "$(dirname "$0")/../../.."
@@ -25,7 +25,7 @@ else
     OUT=port/build/Tenkaichi3Decomp-switch-setup
     CMAKE_SYS="-DSDL_UNIX_CONSOLE_BUILD=ON -DSDL_X11=OFF -DSDL_WAYLAND=OFF"  # (for tests: --install, no window needed)
 fi
-ZIP=${1:-port/build/Tenkaichi3Decomp-switch-SD.zip}
+ZIP=${1:-port/build/Tenkaichi3Decomp-switch.zip}
 W=port/build/switch-setup-$T
 S=$W/sdl
 mkdir -p $W
@@ -64,7 +64,7 @@ fi
 
 # the release's files at its end
 if [ ! -f "$ZIP" ]; then
-    echo "no $ZIP: build the SD zip first (BT3_CC=nx64 port/tools/package.py)"; exit 1
+    echo "no $ZIP: build the zip first (BT3_CC=nx64 port/tools/package.py)"; exit 1
 fi
 cp $W/setup$( [ $T = win ] && echo .exe ) $OUT
 cat "$ZIP" >> $OUT

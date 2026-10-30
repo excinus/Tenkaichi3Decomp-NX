@@ -187,7 +187,7 @@ jobs:
           sig=""; [ -f out/Tenkaichi3Decomp-switch.zip.sig ] && sig=out/Tenkaichi3Decomp-switch.zip.sig
           gh release create "$TAG" --target "$SHA" --title "$TAG (Nintendo Switch)" --notes-file notes.md \
             $( [ "$kind" = prerelease ] && echo --prerelease ) \
-            out/Tenkaichi3Decomp-switch-setup.exe out/Tenkaichi3Decomp-switch-SD.zip out/Tenkaichi3Decomp-switch.zip $sig
+            out/Tenkaichi3Decomp-switch-setup.exe out/Tenkaichi3Decomp-switch.zip $sig
           [ "$SIGNED" = true ] || echo "::warning::$TAG is not signed: games will only say that it exists"
           if [ "$kind" = prerelease ]; then
             gh label create upstream-follow --color 5319e7 --description "follow-upstream.yml" 2>/dev/null || true
