@@ -28,12 +28,12 @@ static pthread_mutex_t sLock = PTHREAD_MUTEX_INITIALIZER;
 
 #ifdef __SWITCH__
 /* The Switch: what the PC versions keep that does not apply there (one screen, OpenGL only, no mouse, its updates
-   are its own: the settings window does not show these there). Not kept, and left out of the file when it is next
+   are its own, no tearing to wait for, no Smooth motion: the settings window does not show these there). Not kept, and left out of the file when it is next
    written. And the start without the logos, the intro movie and the copyright page unless chosen otherwise: the
    movies flicker on the console for now (2026-10-29); and vibration at 30% (Controls), at 100% too strong in the
    Joy-Cons (a player's report, 2026-10-30). */
 static int unused_here(const char *name) {
-    static const char *const kUnused[] = {"fullscreen", "display", "gpu_api", "render_thread", "hide_pointer", "update_check"};
+    static const char *const kUnused[] = {"fullscreen", "display", "gpu_api", "render_thread", "hide_pointer", "update_check", "vsync", "interp"};
     size_t i;
     for (i = 0; i < sizeof(kUnused) / sizeof(kUnused[0]); i++) {
         if (strcmp(name, kUnused[i]) == 0) {

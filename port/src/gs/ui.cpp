@@ -74,6 +74,8 @@ void Port_SettingTextSave(const char *name, const char *value);
 void Port_SettingsWrite(void);
 int Port_ClashSquare(void);                    // gs_input.c: Square counts as a direction in clashes
 void Port_ClashSquareSet(int on);
+int Port_MenuAbSwap(void);                     // gs_input.c: the Switch's A chooses and B goes back in the menus
+void Port_MenuAbSwapSet(int on);
 int Port_ClashSquareX(void);                   // what a press is worth, in quarters of a point (4, 6, 7, 8)
 void Port_ClashSquareXSet(int quarters);
 extern int gsInterp;                           // gs_draw.c: in-between pictures on (1) / off (0); -1 before the first frame
@@ -629,6 +631,12 @@ static void capture(int kind, int player, int action) {
 }
 
 // A controller button pressed in the window (not while it waits for a binding, a list is open or a field is edited).
+// The controller's "back" in these windows: B (the east button) as on a PC pad, or with the Switch's Nintendo layout
+// (Controls) the south one, ImGui's own choosing and going back swapped to match (Ui_DrawGL, ConfigNavSwapGamepadButtons).
+static ImGuiKey pad_back(void) {
+    return Port_MenuAbSwap() ? ImGuiKey_GamepadFaceDown : ImGuiKey_GamepadFaceRight;
+}
+
 static bool pad_pressed(ImGuiKey key) {
     return sCapKind == 0 && !sPadHold && !sQuit && !ImGui::IsAnyItemActive() &&
            !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel) && ImGui::IsKeyPressed(key, false);
@@ -689,7 +697,7 @@ static void build_quit(void) {
         }
         focus = ImGui::IsItemFocused() ? 0 : focus;
         ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(U(140.0f), 0.0f)) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false)) {
+        if (ImGui::Button("Cancel", ImVec2(U(140.0f), 0.0f)) || ImGui::IsKeyPressed(pad_back(), false)) {
             stay = true;
         }
         focus = ImGui::IsItemFocused() ? 1 : focus;
@@ -812,7 +820,7 @@ static void build_net(void) {
 
     ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
     ImGui::SetNextWindowSize(ImVec2(U(560.0f), 0.0f), ImGuiCond_Appearing);
-    if (pad_pressed(ImGuiKey_GamepadFaceRight)) { // Circle / B: out of the window, as its close button
+    if (pad_pressed(pad_back())) { // Circle / B: out of the window, as its close button
         open = false;
     }
     if (ImGui::Begin("Dragon Net Battle", &open, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize)) {
@@ -1199,8 +1207,10 @@ int Ui_Event(const SDL_Event *ev) {
             }
         } else if (ev->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
             SDL_GamepadButton button = (SDL_GamepadButton)ev->gbutton.button;
-            if (button == SDL_GAMEPAD_BUTTON_SOUTH) { PortQuit_Action(PORT_QUIT_CONFIRM); }
-            else if (button == SDL_GAMEPAD_BUTTON_EAST) { PortQuit_Action(PORT_QUIT_CANCEL); }
+            SDL_GamepadButton yes = Port_MenuAbSwap() ? SDL_GAMEPAD_BUTTON_EAST : SDL_GAMEPAD_BUTTON_SOUTH;
+            SDL_GamepadButton no = Port_MenuAbSwap() ? SDL_GAMEPAD_BUTTON_SOUTH : SDL_GAMEPAD_BUTTON_EAST;
+            if (button == yes) { PortQuit_Action(PORT_QUIT_CONFIRM); }
+            else if (button == no) { PortQuit_Action(PORT_QUIT_CANCEL); }
             else if (button == SDL_GAMEPAD_BUTTON_DPAD_LEFT || button == SDL_GAMEPAD_BUTTON_DPAD_RIGHT ||
                      button == SDL_GAMEPAD_BUTTON_DPAD_UP || button == SDL_GAMEPAD_BUTTON_DPAD_DOWN) {
                 if (PortQuit_Ready()) { say_quit_button(1 - PortQuit_Cursor(), 1); }
@@ -1309,14 +1319,26 @@ static bool tab(const char *label, int index) {
 }
 
 static void video_tab(PortVideo &v) {
+#ifdef __SWITCH__ // (its screen and every TV it shows on are 16:9)
+    static const struct { const char *name; int milli; } aspects[] = {{"4:3 (original)", 1333}, {"16:10", 1600}, {"16:9", 1778}};
+#else
     static const struct { const char *name; int milli; } aspects[] = {{"4:3 (original)", 1333}, {"16:10", 1600}, {"16:9", 1778}, {"21:9", 2389}, {"32:9", 3556}};
+#endif
     char label[64];
     int best = 0, count = 0;
 
     snprintf(label, sizeof(label), "%dx  (%d x %d)", v.scale, 512 * v.scale, 448 * v.scale);
     if (ImGui::BeginCombo("Internal resolution", label)) {
-        for (int n = 1; n <= 8; n++) {
+#ifdef __SWITCH__
+        const int most = 3; // (4x and up ran out of memory on a console and closed the game; 1x is what its GPU keeps up with)
+#else
+        const int most = 8;
+#endif
+        for (int n = 1; n <= most; n++) {
             snprintf(label, sizeof(label), "%dx  (%d x %d)", n, 512 * n, 448 * n);
+#ifdef __SWITCH__
+            if (n == 1) { snprintf(label, sizeof(label), "1x  (512 x 448, recommended)"); }
+#endif
             if (ImGui::Selectable(label, n == v.scale)) { v.scale = n; }
         }
         ImGui::EndCombo();
@@ -1348,9 +1370,12 @@ static void video_tab(PortVideo &v) {
 #endif
     {
         bool vs = v.vsync != 0, fs = v.frameSkip != 0;
+#ifndef __SWITCH__ // (the Switch shows each finished picture at its screen's next refresh itself: it never tears)
         if (ImGui::Checkbox("V-sync", &vs)) { v.vsync = vs; }
         ImGui::SetItemTooltip("Each picture waits for the display's refresh. Turn it on if the picture tears.\n"
                               "Off is the default: it adds a little delay.");
+#endif
+        (void)vs;
         if (ImGui::Checkbox("Skip pictures instead of slowing down", &fs)) { v.frameSkip = fs; }
         ImGui::SetItemTooltip("When this machine cannot show a picture in time, the game normally runs slower.\n"
                               "With this on it stays at full speed and leaves pictures out instead (choppier,\n"
@@ -1417,6 +1442,7 @@ static void video_tab(PortVideo &v) {
         ImGui::TextWrapped("Active GPU: %s", sGpuName);
     }
 #endif
+#ifndef __SWITCH__ // (each in-between picture is a second pass through OpenGL: more than a tick holds there, even overclocked)
     {
         // In-between pictures (gs_draw.c): the fight is computed 30 times a second, as on the console; with this
         // on one more picture is drawn between each two. The game itself, its replays and online play are the same.
@@ -1433,6 +1459,7 @@ static void video_tab(PortVideo &v) {
                               "The newest picture reaches the screen later: 17 ms at 60, 25 ms at 120, 29 ms at 240.\n"
                               "Choose what your screen can show. F9 switches it off and on.");
     }
+#endif
     {
         // The size of these windows, the chat and the notices: larger with a taller picture by itself (sUiScale)
         static int steps = 20; // (in fives of a percent; while it is dragged)
@@ -2300,7 +2327,7 @@ static void build(void) {
         sCapKind = 0;
         gPortInputCapture = 0;
     }
-    if (pad_pressed(ImGuiKey_GamepadFaceRight)) { // Circle / B: out of the window
+    if (pad_pressed(pad_back())) { // Circle / B: out of the window
         open = false;
     }
     if (sForceTab < 0 && (pad_pressed(ImGuiKey_GamepadL1) || pad_pressed(ImGuiKey_GamepadR1))) {
@@ -2389,6 +2416,15 @@ static void build(void) {
                                           "stick four directions a turn; Square is one button. 1 is a single d-pad tap.\n"
                                           "Never more than one a frame, which is the most the game counts from any pad.");
                 }
+#ifdef __SWITCH__
+                bool ab = Port_MenuAbSwap() != 0;
+                if (ImGui::Checkbox("Nintendo layout in the menus (A: choose, B: back)", &ab)) {
+                    Port_MenuAbSwapSet(ab);
+                }
+                ImGui::SetItemTooltip("The game's menus choose with Cross and go back with Triangle: on the Switch B and X.\n"
+                                      "With this on, outside a fight A chooses and B goes back (and X is Circle), in these\n"
+                                      "windows too. Fights, the pause menu included, keep the buttons below.");
+#endif
                 ImGui::Separator();
                 controls_tab();
                 ImGui::EndTabItem();
@@ -2414,7 +2450,7 @@ static void build(void) {
             ImGui::SameLine();
 #ifdef __SWITCH__
             // (the Switch's names for the same places: SDL's south button, Cross, is the Switch's B, its east one A)
-            ImGui::TextDisabled("D-pad: move   B: choose   A: back   L / R: tab");
+            ImGui::TextDisabled(Port_MenuAbSwap() ? "D-pad: move   A: choose   B: back   L / R: tab" : "D-pad: move   B: choose   A: back   L / R: tab");
 #else
             ImGui::TextDisabled("D-pad: move   Cross / A: choose   Circle / B: back   L1 / R1: tab");
 #endif
@@ -2885,6 +2921,7 @@ static void chat_draw(void) {
 // Builds this frame's picture of the overlay (the settings or the online window, the line over the picture).
 // false: there is nothing to draw. The same for both back ends; each then draws ImGui's data its own way.
 static bool frame_build(void) {
+    ImGui::GetIO().ConfigNavSwapGamepadButtons = Port_MenuAbSwap() != 0; // (the Switch's Nintendo layout: A chooses, B goes back)
     PortInput_TboClipboard();
     { // a keypad of Tenkaichi Budokai Online takes text: the system's text input is on for it (letters as typed)
         static SDL_Window *on = NULL;

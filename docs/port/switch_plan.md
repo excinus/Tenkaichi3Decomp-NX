@@ -746,3 +746,15 @@ pipeline is a frame more between a press and its picture. Decided with the playe
   wait before the pad read while ticks are skipped) stay;
 - the settings window's footer with the Switch's names: "B: choose   A: back   L / R: tab";
 - added songs and stages checked working on the Switch.
+
+Settings on the Switch (2026-10-30, the player's requests):
+- Internal resolution 1x to 3x (4x closed the game: out of memory), 1x marked recommended and the default where none
+  was saved (gs_draw.c, GsGpu_Init / GsGpu_SetSettings);
+- no Smooth motion (each in-between picture is another pass through OpenGL: 14 ms overclocked on top of the real
+  picture's, more than a tick holds) and no V-sync (the system shows each finished picture at the screen's next
+  refresh: nothing tears), both left out of the settings file there (plat_settings.c); aspect ratios up to 16:9;
+- "Nintendo layout in the menus (A: choose, B: back)" in Controls (setting `menu_nintendo_ab`, off by default): the
+  game's menus choose with Cross and go back with Triangle, by position B and X; with it, while the menus run
+  (headless.c `gPortInMenus`) a controller's A is Cross, B Triangle and X Circle (gs_input.c, menu_ab), and the
+  settings windows and the quit question swap choosing and going back the same way. Fights, the pause menu
+  included, are left as they are.

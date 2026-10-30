@@ -948,6 +948,9 @@ static void bind_target(int i, int clear) {
 }
 
 static void vsync_now(void *on) {
+#ifdef __SWITCH__
+    return; /* (see gl_init_now) */
+#endif
     if (sCtx != NULL) {
         SDL_GL_SetSwapInterval(*(int *)on != 0);
     }
@@ -981,7 +984,11 @@ static int gl_init_now(void) {
         fprintf(stderr, "bt3: gl: no GL 3.3 core context: %s\n", SDL_GetError());
         return 0;
     }
+#ifdef __SWITCH__
+    SDL_GL_SetSwapInterval(0); /* (the system shows each finished picture at the screen's next refresh: no tearing to avoid) */
+#else
     SDL_GL_SetSwapInterval(Port_Setting("vsync", 0) != 0);
+#endif
     if (getenv("BT3_GL_TRACE") != NULL) { fprintf(stderr, "gl: current, loading the functions\n"); }
     if (!load_gl()) { return 0; }
     fprintf(stderr, "bt3: GL renderer: %s (%s)\n", (const char *)glGetString(GL_RENDERER), (const char *)glGetString(GL_VERSION));

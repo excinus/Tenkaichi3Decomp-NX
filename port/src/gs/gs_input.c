@@ -606,6 +606,42 @@ void Port_ClashSquareSet(int on) {
     Port_SettingsWrite();
 }
 
+/* The Nintendo layout in the menus (the Switch: setting menu_nintendo_ab, off by default). The game's menus choose with
+   Cross and go back with Triangle, which by position are the Switch's B and X. With this on, outside a fight, a
+   controller's A chooses and its B goes back: what the controller gives as Circle (A) is Cross, Cross (B) is Triangle,
+   and Triangle (X) is Circle. Fights are left as they are. */
+static int sMenuAb = -1;
+
+int Port_MenuAbSwap(void) {
+    if (sMenuAb < 0) {
+#ifdef __SWITCH__
+        sMenuAb = Port_Setting("menu_nintendo_ab", 0) != 0;
+#else
+        sMenuAb = 0;
+#endif
+    }
+    return sMenuAb;
+}
+
+void Port_MenuAbSwapSet(int on) {
+    sMenuAb = on != 0;
+    Port_SettingSave("menu_nintendo_ab", sMenuAb);
+    Port_SettingsWrite();
+}
+
+static unsigned menu_ab(unsigned btn) {
+    extern int gPortInMenus; /* headless.c */
+    unsigned out;
+    if (!Port_MenuAbSwap() || !gPortInMenus) {
+        return btn;
+    }
+    out = btn & ~(unsigned)(B_CROSS | B_CIRCLE | B_TRIANGLE);
+    out |= (btn & B_CIRCLE) ? B_CROSS : 0;
+    out |= (btn & B_CROSS) ? B_TRIANGLE : 0;
+    out |= (btn & B_TRIANGLE) ? B_CIRCLE : 0;
+    return out;
+}
+
 static void clash_square(int socket, unsigned *btn, unsigned char *lx, unsigned char *ly) {
     extern void *BtlChar_FindByObjId(int objId); /* the game: the fighter of a side, NULL outside a fight */
     extern int BtlAct_GetCurrent(void *chr);     /* its action */
@@ -1046,14 +1082,16 @@ int Port_PadRead(int socket, unsigned char *data) {
     /* (the settings window is worked with the controller too while it is open: nothing of it for the game) */
     g = gPortInputCapture || gPortOverlayOpen || sSwallow ? NULL : pad_of(socket);
     if (g != NULL) {
+        unsigned pbtn = 0;
         for (a = 0; a < PORT_PAD_BUTTONS; a++) {
             int src = sPadBtn[socket][a];
             if (src == PORT_PAD_LT ? SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > PORT_TRIGGER_AT :
                 src == PORT_PAD_RT ? SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > PORT_TRIGGER_AT :
                 src >= 0 && SDL_GetGamepadButton(g, (SDL_GamepadButton)src)) {
-                btn |= kActions[a].bit;
+                pbtn |= kActions[a].bit;
             }
         }
+        btn |= menu_ab(pbtn); /* (the controller's buttons only, not the keyboard's) */
         stick_bytes(sDeadzone[socket][0], SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFTX), SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFTY), &lx, &ly);
         stick_bytes(sDeadzone[socket][1], SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_RIGHTX), SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_RIGHTY), &rx, &ry);
     }

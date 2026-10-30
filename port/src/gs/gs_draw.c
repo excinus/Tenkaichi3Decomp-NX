@@ -2306,7 +2306,11 @@ void GsGpu_SetSettings(const PortVideo *v) {
     PortVideo now;
     GsGpu_GetSettings(&now);
     if (v->scale != now.scale) {
+#ifdef __SWITCH__
+        gsPendingScale = v->scale < 1 ? 1 : v->scale > 3 ? 3 : v->scale; /* applied between two frames (1x to 3x there) */
+#else
         gsPendingScale = v->scale < 1 ? 1 : v->scale > 8 ? 8 : v->scale; /* applied between two frames */
+#endif
     }
     if (v->aspectMilli != now.aspectMilli) {
         Port_SetAspectMilli(v->aspectMilli);
@@ -2368,8 +2372,15 @@ int GsGpu_Init(void) {
     const char *api = getenv("BT3_GPU_API");
     GsBackend *sb;
 
+#ifdef __SWITCH__
+    /* 1x to 3x (4x and up ran out of memory on a console and closed the game), 1x unless chosen (what the GPU keeps up
+       with at its stock clock) */
+    gsScale = getenv("BT3_SCALE") != NULL ? atoi(getenv("BT3_SCALE")) : Port_Setting("scale", 1);
+    gsScale = gsScale < 1 ? 1 : gsScale > 3 ? 3 : gsScale;
+#else
     gsScale = getenv("BT3_SCALE") != NULL ? atoi(getenv("BT3_SCALE")) : Port_Setting("scale", 2);
     gsScale = gsScale < 1 ? 1 : gsScale > 8 ? 8 : gsScale;
+#endif
     gsPendingScale = 0;
     gsVerts = malloc(MAX_VERTS * sizeof(Vtx));
     gsVuVerts = malloc(MAX_VU_VERTS * 48);
@@ -4969,6 +4980,9 @@ void GsGpu_FrameEnd(void) {
             if (GsGl_Split()) {
                 gsInterp = 0; /* (see the top of this function) */
             }
+#ifdef __SWITCH__
+            gsInterp = 0; /* (no Smooth motion on the Switch: an in-between picture is another pass through OpenGL, more than a tick holds) */
+#endif
             sInterpPrev = malloc(MAX_VU_UNIFORMS * sizeof(Vu0Uniform));
             sInterpBlend = malloc(MAX_VU_UNIFORMS * sizeof(Vu0Uniform));
             sInterpPrevSig = malloc(MAX_VU_UNIFORMS * sizeof(uint32_t));
