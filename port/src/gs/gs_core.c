@@ -1204,6 +1204,14 @@ static int sJob;            /* 0 none, 1 start the GPU back end, 2 run a list */
 static uint32_t sJobTadr;
 static int sJobTte, sInitResult;
 static uint32_t sJobQwc; /* job 4, a GIF channel transfer: its size (Port_GsGifChannel) */
+static int sJobFbp;      /* the game's shown buffer when the job was handed over (gs_sony.c, gGsMainFbpGame) */
+extern int gGsMainFbp, gGsMainFbpGame;
+extern uint64_t gGpuEndNs; /* gs_draw.c */
+/* BT3_GS_VERBOSE: the game's thread waiting for the render thread (the GIF channel's transfers, the end of a tick
+   before its list is handed over, anything else), and the render thread's own time per list, drawn or skipped. */
+static uint64_t sWaitNs[3], sListNs[2], sListEndNs[2];
+static unsigned sWaitCount[3], sGifCount, sListCount[2];
+static uint64_t now_ns(void);
 static void gif_channel(uint32_t addr, uint32_t qwc, int chain);
 static int sStopping; /* the program is ending: the render thread leaves its loop (render_stop) */
 static int sListDone; /* the list being run has been drawn and its first picture shown (Smooth motion's others may follow) */
@@ -1303,6 +1311,7 @@ static void *render_thread(void *arg) {
             pthread_mutex_unlock(&sLock);
             return NULL;
         }
+        gGsMainFbp = sJobFbp; /* the buffer as the game had set it for this job, not as it is by now */
         if (sJob == 1) {
             sInitResult = GsGpu_Init();
         } else if (sJob == 3) {
@@ -1313,13 +1322,19 @@ static void *render_thread(void *arg) {
         } else {
             uint32_t tadr = sJobTadr;
             int tte = sJobTte;
+            int skipped = gsSkipFrame != 0; /* (decided at the end of the list before) */
+            uint64_t t0 = now_ns(), end0;
             pthread_mutex_unlock(&sLock);
             {
                 extern void GsGpu_InterpHurry(int on);
                 GsGpu_InterpHurry(0);
             }
+            end0 = gGpuEndNs;
             run_frozen();
             pthread_mutex_lock(&sLock);
+            sListNs[skipped] += now_ns() - t0;
+            sListEndNs[skipped] += gGpuEndNs >= end0 ? gGpuEndNs - end0 : gGpuEndNs;
+            sListCount[skipped]++;
             sListDone = 1;
             pthread_cond_broadcast(&sDone);
             pthread_mutex_unlock(&sLock);
@@ -1341,13 +1356,25 @@ static void *render_thread(void *arg) {
     return NULL;
 }
 
-/* Blocks until the render thread has nothing to do. */
-static void render_wait(void) {
+/* Blocks until the render thread has nothing to do. `site`: which wait it is (sWaitNs). */
+static void render_wait_at(int site) {
+    uint64_t t0 = 0;
     pthread_mutex_lock(&sLock);
+    if (sJob != 0) {
+        t0 = now_ns();
+    }
     while (sJob != 0) {
         pthread_cond_wait(&sDone, &sLock);
     }
+    if (t0 != 0) {
+        sWaitNs[site] += now_ns() - t0;
+        sWaitCount[site]++;
+    }
     pthread_mutex_unlock(&sLock);
+}
+
+static void render_wait(void) {
+    render_wait_at(2);
 }
 
 /* At the program's end (atexit), from the game's thread: the list being drawn is finished, then the thread leaves
@@ -1403,6 +1430,7 @@ static void render_post(int job, uint32_t tadr, int tte) {
     sListDone = 0;
     sJobTadr = tadr;
     sJobTte = tte;
+    sJobFbp = gGsMainFbpGame;
     pthread_cond_signal(&sWake);
     pthread_mutex_unlock(&sLock);
 }
@@ -1533,16 +1561,18 @@ void Port_GsGifChannel(uint32_t addr, uint32_t qwc, int chain) {
         return;
     }
     if (sThreaded) {
-        render_wait(); /* the GS is one device: this transfer goes after the list that is being drawn */
+        sGifCount++;
+        render_wait_at(0); /* the GS is one device: this transfer goes after the list that is being drawn */
         if (sGpu && GsGpu_BackendIsGl() && !pthread_equal(pthread_self(), sThread)) {
             /* OpenGL on the render thread: its context is that thread's, and a transfer can draw (the game clears
                its frame buffers this way) and make targets. Carried out there, the game's thread waiting. (On the
                Switch, done here: the targets made without a context, nothing was ever shown.) */
             sJobQwc = qwc;
             render_post(4, addr, chain);
-            render_wait();
+            render_wait_at(0);
             return;
         }
+        gGsMainFbp = gGsMainFbpGame; /* (the thread is idle: the transfer is carried out here) */
     }
     gif_channel(addr, qwc, chain);
 }
@@ -1588,7 +1618,7 @@ void Port_GsVif1Chain(uint32_t tadr, int tte) {
     if (sThreaded) {
         extern void GsGpu_InterpHurry(int on); /* gs_draw.c: the next list is here: the tick's real picture at once */
         GsGpu_InterpHurry(1);
-        render_wait(); /* the previous list must be finished before this one starts (the PS2's sceGsSyncPath) */
+        render_wait_at(1); /* the previous list must be finished before this one starts (the PS2's sceGsSyncPath) */
     } else {
         run_chain(tadr, tte);
     }
@@ -1656,6 +1686,23 @@ void Port_GsVif1Chain(uint32_t tadr, int tte) {
             }
             if (getenv("BT3_GS_VERBOSE") != NULL) {
                 fprintf(stderr, "time:   frames lasted %.1f to %.1f ms (33.4 in a fight, 16.7 in the menus)\n", (double)perMin / 1e6, (double)perMax / 1e6);
+            }
+            if (getenv("BT3_GS_VERBOSE") != NULL && sThreaded) {
+                pthread_mutex_lock(&sLock);
+                fprintf(stderr, "time:   the game's thread waited for the render thread: %.1f ms per frame in %u of %u GIF channel transfers, "
+                                "%.1f at %u of 60 frames' ends, %.1f elsewhere (%u); the render thread: %u lists drawn, %.1f ms each "
+                                "(of it ending the frame %.1f), %u skipped, %.1f ms each\n",
+                        (double)sWaitNs[0] / 60e6, sWaitCount[0], sGifCount, (double)sWaitNs[1] / 60e6, sWaitCount[1], (double)sWaitNs[2] / 60e6,
+                        sWaitCount[2], sListCount[0], sListCount[0] ? (double)sListNs[0] / sListCount[0] / 1e6 : 0.0,
+                        sListCount[0] ? (double)sListEndNs[0] / sListCount[0] / 1e6 : 0.0, sListCount[1],
+                        sListCount[1] ? (double)sListNs[1] / sListCount[1] / 1e6 : 0.0);
+                memset(sWaitNs, 0, sizeof(sWaitNs));
+                memset(sWaitCount, 0, sizeof(sWaitCount));
+                memset(sListNs, 0, sizeof(sListNs));
+                memset(sListEndNs, 0, sizeof(sListEndNs));
+                memset(sListCount, 0, sizeof(sListCount));
+                sGifCount = 0;
+                pthread_mutex_unlock(&sLock);
             }
             n = 0; sum = 0; worst = 0; over = 0;
             sumGame = sumList = sumTex = sumPipe = sumEnd = 0;

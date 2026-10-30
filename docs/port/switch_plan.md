@@ -8,8 +8,8 @@ controllers) are written and the game links with them. On a console it now runs 
 sound and controllers (after a black screen found to be SDL asking libnx's sockets service for the number of
 processors, see "Results") and into fights: with the CPU at 1785 MHz (sys-clk) a fight at a clean 30 pictures a
 second, the HUD, effects and pause menu shown, the menus without stops (the data folder of 65,000 files read from
-one pack, `pack_gamedata.py`). Open: speed at the stock clock (the OpenGL driver's CPU work, about 25 ms a fight
-frame there), the intro movies flickering black.
+one pack, `pack_gamedata.py`), the intro movie at 30 pictures a second. Open: speed at the stock clock (the render
+thread about 43 ms per drawn fight frame there, OpenGL's draws 23 of it).
 Phase 3 done: the game's demo fight ran to its end on a Switch, its fight state identical to the PC's on all 4242
 blanks of fighting (see "Results").
 - Phase 1: `port/switch/spike`, a homebrew program that checks on a console what the port depends on (memory,
@@ -692,3 +692,17 @@ the stock fight. Changed:
   column table within it), checked equal to the pixel-by-pixel reading over the whole 1024 x 1024; both back ends'
   copies of an uploaded picture use it;
 - the render thread's profile every 10 s (the game thread's stays at 30 s).
+
+The kit of commit a96e4fc, two runs. The intro movie perfect in both (30 pictures a second, no flicker, the stock
+clock too); fights perfect overclocked, at the stock clock 10 to 15 pictures a second with very uneven pacing. The
+stock fight's log: every third tick 55 ms of the game's time, of it 26 ms waiting for the render thread; the render
+thread about 43 ms per drawn list (OpenGL's draws 23 ms, uploads 2.5, the list's walk the rest), idle a third of
+the time; the game's thread waiting 42% of it. The pacing: sceGsSwapDBuff sets the buffer the next frame is drawn
+into (and shown from, gGsMainFbp) before the game waits for the render thread, so a list still being drawn read
+the next frame's buffer and showed the other one, an older picture (two or more ticks old when the tick before
+was skipped). Overclocked the list is done before the game gets there, which is why those runs were smooth.
+Changed:
+- gGsMainFbp is the render thread's: each job takes the game's value as it was when the job was handed over
+  (gs_sony.c `gGsMainFbpGame`, gs_core.c `sJobFbp`);
+- `BT3_GS_VERBOSE`: per 60 frames, the game's thread's waits for the render thread (in GIF channel transfers, at
+  the frame's end, elsewhere) and the render thread's time per drawn and per skipped list, of it ending the frame.
