@@ -2,7 +2,9 @@
 # follow-upstream.yml (a release of the original repository's update): port/switch/release/build.sh in devkitPro's
 # container, the zips signed, and kept as the artifact `switch-release`:
 #   Tenkaichi3Decomp-switch.zip (+ .sig)   the game's folder: what the game's automatic update installs
-#   Tenkaichi3Decomp-switch-SD.zip         the SD card's layout, for a first install
+#   Tenkaichi3Decomp-switch-SD.zip         the SD card's layout, for a first install by hand
+#   Tenkaichi3Decomp-switch-setup.exe      the Windows setup (port/switch/setup): that zip inside, put on the card with
+#                                          the game data from the player's disc image or PC version
 #
 # The signing key: the repository secret UPDATE_SIGNING_KEY (made once with `python3 port/tools/update_key.py
 # generate`). Its public half is compiled into the game (BT3_UPDATE_KEY, port/src/update_key.h): a game installs only
@@ -124,6 +126,12 @@ jobs:
         if: inputs.compare_ref != ''
         run: python3 t/port/switch/release/compare.py old-build t/port/build --out "$GITHUB_OUTPUT"
 
+      # the Windows setup, with the SD zip at its end (port/switch/setup/build.sh: mingw-w64, SDL3 built static)
+      - name: The Windows setup
+        run: |
+          apt-get install -y --no-install-recommends mingw-w64 cmake
+          cd t && sh port/switch/setup/build.sh win
+
       - name: Sign
         id: sign
         env:
@@ -145,6 +153,7 @@ jobs:
             t/port/build/Tenkaichi3Decomp-switch.zip
             t/port/build/Tenkaichi3Decomp-switch.zip.sig
             t/port/build/Tenkaichi3Decomp-switch-SD.zip
+            t/port/build/Tenkaichi3Decomp-switch-setup.exe
             t/port/build/stubs.txt
             t/port/build/stubs_added.txt
           if-no-files-found: warn

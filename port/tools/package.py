@@ -455,24 +455,24 @@ licences: licenses/. Its source, this release's tag included: https://github.com
 Switch's), from https://github.com/z3xox/Tenkaichi3Decomp (the port's).
 """
 
-NX_INSTALL = """Tenkaichi3Decomp for the Nintendo Switch - installing
+NX_INSTALL = """Tenkaichi3Decomp for the Nintendo Switch - installing by hand
+
+On Windows, Tenkaichi3Decomp-switch-setup.exe (on the same releases page) does all of this for you, from your disc
+image or from your PC version. By hand (Linux, macOS):
 
 You need:
   - a Switch with Atmosphere and the homebrew menu, and sys-clk (it comes with the HATS pack). The game sets the
     clocks it needs by itself while it runs; without sys-clk fights run at 16 to 20 fps;
-  - the PC version of Tenkaichi3Decomp, installed from your own disc (its game data is copied from it).
+  - the PC version of Tenkaichi3Decomp, installed from your own disc: its game data is copied from it.
 
-1. Unpack this zip to the root of the SD card (with the card in the PC): atmosphere\\, switch\\ and the rest.
-2. On the card, double-click "Install game data (Windows).bat" and choose the folder of your PC installation of
-   Tenkaichi3Decomp. It copies the game data to the card (a few GB: several minutes). If Windows warns about the
-   file, choose "More info" > "Run anyway".
-   (Linux or macOS: copy the PC installation's gamedata folder into atmosphere/contents/0100B73DEC000000/ on the
-   card, then: python3 bt3-install/pack_gamedata.py <card>/atmosphere/contents/0100B73DEC000000/gamedata --delete)
-3. Put the card back in the Switch, open the homebrew menu THROUGH A GAME (hold R while starting any game) and
-   start Tenkaichi3Decomp.
+1. Copy the atmosphere and switch folders of this zip to the root of the SD card.
+2. Copy the gamedata folder of your PC installation into atmosphere/contents/0100B73DEC000000/ on the card.
+3. Pack its folder of 65,000 voice files into one file (the Switch is slow to open files in so large a folder):
+       python3 pack_gamedata.py <card>/atmosphere/contents/0100B73DEC000000/gamedata --delete
+4. On the Switch, open the homebrew menu THROUGH A GAME (hold R while starting any game) and start Tenkaichi3Decomp.
 
-The installer and bt3-install\\ can be deleted from the card afterwards. Updates come by themselves: + and - together
-in the game, then Update now. Saves are in saves/ in atmosphere/contents/0100B73DEC000000/, as on the PC.
+Updates come by themselves: + and - together in the game, then Update now. Saves are in saves/ in
+atmosphere/contents/0100B73DEC000000/, as on the PC.
 """
 
 NX_LIBRARIES = """The Switch program (Tenkaichi3Decomp) is linked with these libraries besides the port's own (see the
@@ -495,7 +495,8 @@ def main_nx():
     atmosphere/contents/0100B73DEC000000/ on the SD card; the zip is what the automatic update takes. With the
     launcher built (port/switch/launcher/build.sh, before this), its copy launcher.nro is in it (the launcher takes it
     from there), and a second zip has the SD card's whole layout for a first install (Tenkaichi3Decomp-switch-SD.zip:
-    atmosphere/, switch/Tenkaichi3Decomp.nro, the game data's installer, INSTALL.txt). BT3_NX_LAUNCHER=1: an error without it
+    atmosphere/, switch/Tenkaichi3Decomp.nro, pack_gamedata.py, INSTALL.txt; also what the Switch
+    setup carries, port/switch/setup). BT3_NX_LAUNCHER=1: an error without it
     (a release)."""
     import toolchain
     exe = toolchain.EXE
@@ -553,14 +554,8 @@ def main_nx():
                                p.read_bytes(), compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
             z.writestr(zipfile.ZipInfo.from_file(launcher, "switch/Tenkaichi3Decomp.nro"), launcher.read_bytes(),
                        compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
-            # the game data's installer: a .bat to double-click (its lines ended for Windows), and what it runs
-            inst = ROOT / "port/switch/install"
-            bat = "Install game data (Windows).bat"
-            z.writestr(zipfile.ZipInfo.from_file(inst / bat, bat),
-                       (inst / bat).read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"), compress_type=zipfile.ZIP_DEFLATED)
-            for f, name in ((inst / "install_gamedata.ps1", "bt3-install/install_gamedata.ps1"),
-                            (ROOT / "port/switch/pack_gamedata.py", "bt3-install/pack_gamedata.py")):
-                z.writestr(zipfile.ZipInfo.from_file(f, name), f.read_bytes(), compress_type=zipfile.ZIP_DEFLATED)
+            pack = ROOT / "port/switch/pack_gamedata.py"
+            z.writestr(zipfile.ZipInfo.from_file(pack, "pack_gamedata.py"), pack.read_bytes(), compress_type=zipfile.ZIP_DEFLATED)
             z.writestr("INSTALL.txt", NX_INSTALL.replace("\n", "\r\n"), compress_type=zipfile.ZIP_DEFLATED)
         print(f"{NX_SD_ZIP.relative_to(ROOT)}: {NX_SD_ZIP.stat().st_size / 1e6:.1f} MB (the SD card's layout, for a first install)")
 

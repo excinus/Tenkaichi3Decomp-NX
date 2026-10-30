@@ -38,9 +38,9 @@ The Switch version works like the PC one, automatic update included, and the fol
 PC release folder. It is this fork's own release (excinus/Tenkaichi3Decomp-NX), not the original repository's: no
 Switch mode in the PC setup, no NSP (see "Releases (phase 5)").
 
-1. **The release** (this fork's GitHub releases): `Tenkaichi3Decomp-switch-SD.zip`, the SD card's layout, for a
-   first install, with `INSTALL.txt`, and `Tenkaichi3Decomp-switch.zip` with its `.sig`, the game's folder, for the
-   automatic update:
+1. **The release** (this fork's GitHub releases): `Tenkaichi3Decomp-switch-setup.exe`, the Windows setup ("The
+   setup", below); `Tenkaichi3Decomp-switch-SD.zip`, the SD card's layout, for a first install by hand, with
+   `INSTALL.txt`; and `Tenkaichi3Decomp-switch.zip` with its `.sig`, the game's folder, for the automatic update:
 
    ```
    <SD>/atmosphere/contents/0100B73DEC000000/      the game's folder: the PC release folder, for the Switch
@@ -54,9 +54,9 @@ Switch mode in the PC setup, no NSP (see "Releases (phase 5)").
    <SD>/switch/Tenkaichi3Decomp.nro   the launcher, in the homebrew menu
    ```
 
-2. **The game data**: the PC installation's `gamedata`, copied to the card by `Install game data (Windows).bat`
-   in the zip (PowerShell, `port/switch/install`: a folder picker, robocopy, and the folder of 65,000 voice files
-   written as one pack, as `pack_gamedata.py` does; "The packs"). Linux and macOS: copy, then `pack_gamedata.py`.
+2. **The game data**: put on the card by the setup, from the player's disc image or the PC version installed before;
+   the folder of 65,000 voice files is one pack there ("The packs"). By hand: the PC installation's `gamedata`
+   copied, then `pack_gamedata.py`.
 3. **Play**: the homebrew menu (opened through a game, holding R) starts the launcher, which loads `Tenkaichi3Decomp`
    from the folder. F1 is + and - together (the PC's START + SELECT). sys-clk is required: the game sets the clocks
    it needs itself (phase 4).
@@ -263,6 +263,30 @@ times. Whether that is full speed is known only when the game's own demo fight r
 field on Linux, multiplied by that, against the 16.7 ms of a field. If the console is too slow for full speed even with the renderer
 on another core, the options are the hot paths in faster exact code (the vector library in integer NEON),
 or a mode that skips drawing frames.
+
+## The setup
+
+`Tenkaichi3Decomp-switch-setup.exe` (`port/switch/setup`): one Windows program, put anywhere, that carries the
+release's SD zip at its end (`build.sh` appends it with a trailer: `BT3NXSD1` and its size). Its window is the PC
+setup's (`port/setup/setup.cpp`: SDL3, linked in statically here, and Dear ImGui), in the Switch's red. The player
+chooses where the game data comes from and the SD card, and presses Install (`work.cpp`, on a thread, reporting in
+the PC setup's event lines):
+
+1. **Switch files**: the zip's `atmosphere/` and `switch/` onto the card (each file written as `.part`, then renamed).
+2. **Disc image** (the USA image, as the PC setup checks it: `port/setup/native.cpp` is compiled into `work.cpp`, its
+   ISO reader, checksums and European languages used as they are) or **PC installation** (its `gamedata` found).
+3. **Game data**: from the image, the loose files to `gamedata/disc/`, the small archives split as the PC's gamedata
+   has them, and an archive of 10,000 files or more (PZS3US2.AFS) copied whole as `gamedata/<name>.afs`, the disc's
+   own archive being the pack the Switch reads; from the PC version, its files copied and each folder of 10,000
+   files or more written as one pack, checked (every size, every 250th file's bytes). Files already on the card
+   with the right size are kept: a second run continues where one stopped.
+4. **European languages** (optional, from the image route): the PC setup's own step, into the card's `gamedata`.
+
+`--install (--iso <file> [--eu <file>] | --pc <folder>) --sd <folder>` does the same without a window. Checked
+(2026-10-30) with made-up data, the Linux build and the Windows one (under Wine): a made-up image (its checksums
+refused, then `BT3_NXSETUP_NOCHECK=1`) gave `pzs3us2.afs` equal to the image's archive and the small one split
+entry for entry; a made-up PC installation (10,499 voice files with a gap) gave a pack equal byte for byte to
+`pack_gamedata.py`'s, every other file copied; a second run kept everything.
 
 ## Releases (phase 5)
 
