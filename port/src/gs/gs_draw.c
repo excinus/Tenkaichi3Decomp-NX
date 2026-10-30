@@ -128,6 +128,11 @@ int gsAnchor;
 static int sHudLayout;
 static unsigned sHudFrame;
 static int sHudSeen;
+/* BT3_HUD_LOG (testing): what of a fight's HUD reached the renderer since the last report (gs_gl.c, beside the
+   "gpu:" line): the game's markers by kind (0x10 left, right, centre, end, by position, 0x15 and 0x16 the long
+   health bars, loading, announcement), the primitives drawn after a side's marker, those the renderer kept (not
+   dropped as a PS2-only pass) and of those the 2D ones with alpha 0. */
+unsigned gHudMarks[9], gHudPrims, gHudKept, gHudClear;
 /* 1 = the HUD's side panels were drawn within the last few frames (a few: frames left out by frame skipping). */
 int GsDraw_HudShown(void) {
     return sHudSeen && gGsFrame - sHudFrame <= 6;
@@ -1475,14 +1480,17 @@ void GsGpu_Draw(int type, int ctx, const GsVertex *v) {
     float s[3], t[3], q[3];
     const GsVertex *flat = &v[n - 1];
     GsDraw d, *last;
-    int i, packed2d = 0;
+    int i, packed2d = 0, side = gsAnchor == 1 || gsAnchor == 2 || gsAnchor == 5 || gsAnchor == 6;
 
+    gHudPrims += side;
     if (gsVertCount + 6 > MAX_VERTS || gsDrawCount == MAX_DRAWS) {
         return;
     }
     if (!draw_state(ctx, type == 1 ? 1 : type == 0 ? 2 : 0, type == 6, 0, &d, &us, &vs)) {
         return;
     }
+    gHudKept += side;
+    gHudClear += side && (type == 6 || fst) && v[type == 6 ? 1 : 0].a == 0;
     int battleText = !d.tex_is_target && sLast != NULL && sLast->tex == d.tex && sLast->battleText;
     int tbo = (prim >> 4) & 1 && ((t0 >> 20) & 0x3F) == TBO_PSM; /* a Tenkaichi Budokai Online picture */
     if (type == 6 || fst) {
@@ -1978,6 +1986,9 @@ void GsGpu_Native(int effect) {
     uint64_t sc = gGs.scissor[0];
     GsDraw d;
 
+    if (effect >= 0x10 && effect <= 0x18) {
+        gHudMarks[effect - 0x10]++;
+    }
     /* 1 = outline. 2 (the see-through tint) is drawn by the generic table pass now (depth_clut), from the game's
        own table. */
     if (effect >= 0x15 && effect <= 0x18) {

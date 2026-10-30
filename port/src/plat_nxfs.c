@@ -14,11 +14,13 @@
  *     (NxFs_Stuck); and the main thread's last call (NxFs_MainLast);
  *   - past BRAKE_AT calls in a tenth of a second, every further call in that tenth waits a millisecond first (the
  *     watch thread's own excepted): the console stays usable and the program goes on, slower.
- * fopen is wrapped too: each file gets a buffer of BUFFER bytes, not the C library's 1 KB.
+ * fopen is wrapped too: each file gets a buffer of BUFFER bytes, not the C library's 1 KB; and a file of a folder that
+ * has a pack next to it is read from the pack (see "The packs" below).
  */
 #ifdef __SWITCH__
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <switch.h>
 
@@ -321,11 +323,197 @@ size_t NxTrace_Report(char *out, size_t cap) {
     return at;
 }
 
+/* The packs. The disc's archive PZS3US2.AFS is about 65,000 files, and the setup unpacks it into one folder
+   (gamedata/pzs3us2, port/tools/extract_disc.py). On the card, the console's file service looks a name up in a folder
+   by reading the folder from its start: in that one, an open took 0.3 to 0.4 s (measured: the game's thread sampled
+   in a stall, 95% of it in the file service, opening a file of that folder or reading its time stamp, which the C
+   library's open asks for too). The menus play a spoken guide for the item chosen, a fight its fighters' lines:
+   every one a stop of a second or more. (The online item of the menu has no guide: it was the one move without.)
+   A pack is the folder as one file next to it, <folder>.afs, of the disc's own kind (the AFS archive: "AFS\0", the
+   number of files, an offset and a size for each; port/switch/pack_gamedata.py makes it from the folder, and the
+   disc's own file, renamed, is one too): a file "<folder>/<number>.bin" opened for reading is the pack's piece,
+   with the pack's one handle and its table read once, and the folder is not looked at. A folder without a pack is
+   read as before. */
+#define PACKS 32 /* folders asked for (mods/ and each language's included) */
+typedef struct {
+    char dir[192]; /* the folder as the program names it */
+    int found;     /* 1: a pack */
+    FsFile f;
+    u32 count;
+    u32 *table; /* offset, size for each file; offset 0: not in the pack */
+} NxPack;
+static NxPack sPack[PACKS];
+static int sPacks;
+static Mutex sPackLock;
+typedef struct {
+    NxPack *pack;
+    u64 off, size, pos;
+} NxPackFile;
+
+static void pack_load(NxPack *k) {
+    char path[208], fsPath[FS_MAX_PATH];
+    FsFileSystem *fs;
+    u32 head[2];
+    u64 got = 0, size = 0;
+
+    snprintf(path, sizeof(path), "%s.afs", k->dir);
+    if (fsdevTranslatePath(path, &fs, fsPath) < 0 || R_FAILED(fsFsOpenFile(fs, fsPath, FsOpenMode_Read, &k->f))) {
+        return;
+    }
+    if (R_FAILED(fsFileRead(&k->f, 0, head, sizeof(head), FsReadOption_None, &got)) || got != sizeof(head) ||
+        memcmp(head, "AFS\0", 4) != 0 || head[1] == 0 || head[1] > 1000000 || R_FAILED(fsFileGetSize(&k->f, (s64 *)&size)) ||
+        (k->table = malloc((size_t)head[1] * 8)) == NULL ||
+        R_FAILED(fsFileRead(&k->f, 8, k->table, (u64)head[1] * 8, FsReadOption_None, &got)) || got != (u64)head[1] * 8) {
+        fprintf(stderr, "bt3: %s is not an AFS archive the game can read: the folder is read instead\n", path);
+        free(k->table);
+        k->table = NULL;
+        fsFileClose(&k->f);
+        return;
+    }
+    {
+        u32 i;
+        for (i = 0; i < head[1]; i++) { /* (a piece past the pack's end: as if it were not there) */
+            if ((u64)k->table[i * 2] + k->table[i * 2 + 1] > size) {
+                k->table[i * 2] = 0;
+            }
+        }
+    }
+    k->count = head[1];
+    k->found = 1;
+    fprintf(stderr, "bt3: %s/: read from %s (%u files, %llu MB)\n", k->dir, path, (unsigned)k->count, (unsigned long long)(size >> 20));
+}
+
+/* The pack piece for `path`, if its folder has a pack and the pack has the file. */
+static int pack_find(const char *path, NxPack **pack, u64 *off, u64 *size) {
+    const char *name = strrchr(path, '/'), *c;
+    char dir[192];
+    size_t n, i;
+    unsigned long index;
+    NxPack *k = NULL;
+
+    if (name == NULL || name[1] < '0' || name[1] > '9') {
+        return 0;
+    }
+    for (c = name + 1; *c >= '0' && *c <= '9'; c++) {
+    }
+    if (strcmp(c, ".bin") != 0 || c - name > 7) {
+        return 0;
+    }
+    index = strtoul(name + 1, NULL, 10);
+    for (n = (size_t)(name - path); n > 0 && path[n - 1] == '/'; n--) { /* ("gamedata//pzs3us2/...": the folder's name) */
+    }
+    if (n == 0 || n >= sizeof(dir)) {
+        return 0;
+    }
+    memcpy(dir, path, n);
+    dir[n] = '\0';
+    mutexLock(&sPackLock);
+    for (i = 0; i < (size_t)sPacks && strcmp(sPack[i].dir, dir) != 0; i++) {
+    }
+    if (i < (size_t)sPacks) {
+        k = &sPack[i];
+    } else if (sPacks < PACKS) {
+        k = &sPack[sPacks++];
+        snprintf(k->dir, sizeof(k->dir), "%s", dir);
+        pack_load(k);
+    }
+    mutexUnlock(&sPackLock);
+    if (k == NULL || !k->found || index >= k->count || k->table[index * 2] == 0) {
+        return 0;
+    }
+    *pack = k;
+    *off = k->table[index * 2];
+    *size = k->table[index * 2 + 1];
+    return 1;
+}
+
+static int pack_read(void *cookie, char *buf, _READ_WRITE_BUFSIZE_TYPE n) {
+    NxPackFile *p = cookie;
+    u64 got = 0;
+
+    if (n == 0 || p->pos >= p->size) {
+        return 0;
+    }
+    if ((u64)n > p->size - p->pos) {
+        n = (_READ_WRITE_BUFSIZE_TYPE)(p->size - p->pos);
+    }
+    /* (a read says where it reads: the one handle serves every thread's files at once) */
+    if (R_FAILED(fsFileRead(&p->pack->f, p->off + p->pos, buf, (u64)n, FsReadOption_None, &got))) {
+        return -1;
+    }
+    p->pos += got;
+    return (int)got;
+}
+
+#ifdef __LARGE64_FILES
+typedef _fpos64_t NxPackPos;
+#else
+typedef fpos_t NxPackPos;
+#endif
+static NxPackPos pack_seek(void *cookie, NxPackPos off, int whence) {
+    NxPackFile *p = cookie;
+    long long at = whence == SEEK_SET ? 0 : whence == SEEK_CUR ? (long long)p->pos : (long long)p->size;
+
+    at += (long long)off;
+    if (at < 0) {
+        return -1;
+    }
+    p->pos = (u64)at;
+    return (NxPackPos)at;
+}
+
+static int pack_close(void *cookie) {
+    free(cookie);
+    return 0;
+}
+
+/* The calling thread onto one core (the render thread, gs/gs_core.c): libnx's threads start on the program's
+   default core, the game's own. */
+void Port_NxThreadCore(int core) {
+    Result rc = svcSetThreadCoreMask(CUR_THREAD_HANDLE, core, 1u << core);
+    if (R_FAILED(rc)) {
+        fprintf(stderr, "bt3: a thread could not be moved to core %d (0x%x)\n", core, (unsigned)rc);
+    }
+}
+
 /* Every file the C library opens: a buffer of BUFFER bytes (its own would be 1 KB: one request to the card per
-   kilobyte read). Before any reading or writing, as setvbuf has to be. */
+   kilobyte read). Before any reading or writing, as setvbuf has to be. A file of a packed folder, opened for reading,
+   is its piece of the pack. */
 FILE *__real_fopen(const char *path, const char *mode);
 FILE *__wrap_fopen(const char *path, const char *mode) {
-    FILE *f = __real_fopen(path, mode);
+    NxPack *pack;
+    u64 off, size;
+    FILE *f;
+
+    if (path != NULL && mode != NULL && mode[0] == 'r' && strchr(mode, '+') == NULL && pack_find(path, &pack, &off, &size)) {
+        NxPackFile *p = malloc(sizeof(*p));
+        if (p != NULL) {
+            p->pack = pack;
+            p->off = off;
+            p->size = size;
+            p->pos = 0;
+            f = funopen(p, pack_read, NULL, pack_seek, pack_close);
+            if (f != NULL) {
+                setvbuf(f, NULL, _IOFBF, BUFFER);
+                return f;
+            }
+            free(p);
+        }
+    }
+    {
+        u64 t0 = armGetSystemTick();
+        f = __real_fopen(path, mode);
+        if (f != NULL && path != NULL && armTicksToNs(armGetSystemTick() - t0) > 150000000ull) {
+            /* said once: the folder of a slow open, and what makes it quick */
+            static int said;
+            if (!said) {
+                said = 1;
+                fprintf(stderr, "bt3: opening %s took %llu ms: a folder of many files. pack_gamedata.py (in the test kit) makes "
+                                "it one file, which the game reads at once\n",
+                        path, (unsigned long long)(armTicksToNs(armGetSystemTick() - t0) / 1000000ull));
+            }
+        }
+    }
     if (f != NULL) {
         setvbuf(f, NULL, _IOFBF, BUFFER);
     }

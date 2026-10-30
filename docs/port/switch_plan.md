@@ -6,8 +6,9 @@ record of what was checked; update it as phases land, as docs/port/macos_plan.md
 Status 2026-10-29: phase 4 under way: the Switch's drivers for SDL3 (video with OpenGL through Mesa, sound,
 controllers) are written and the game links with them. On a console it now runs to the main menu, with picture,
 sound and controllers (after a black screen found to be SDL asking libnx's sockets service for the number of
-processors, see "Results") and into fights; open: the speed of a fight (6 to 11 pictures a second of 30), a stutter
-at each move in the main menus, the intro movies flickering black.
+processors, see "Results") and into fights, a fight at 20 to 30 pictures a second; open: stops of a second at each
+spoken line (in the menus at each move: a folder of 65,000 files, now read from one pack, "Results"), the fight's
+HUD and pause menu not shown, the intro movies flickering black.
 Phase 3 done: the game's demo fight ran to its end on a Switch, its fight state identical to the PC's on all 4242
 blanks of fighting (see "Results").
 - Phase 1: `port/switch/spike`, a homebrew program that checks on a console what the port depends on (memory,
@@ -574,3 +575,33 @@ Changed:
 - on the Switch, the start without the logos, the intro movie and the copyright page by default (the movies flicker),
   and the settings that do not apply there (full screen, display, renderer, render thread, mouse pointer, update
   check) neither kept nor written.
+
+The kit of commit c93129d, the same console, two runs (the second with `mesa_glthread=true`): a fight at 20 to 30
+pictures a second without Mesa's thread (with it, slower again), with stops of a second or more; the HUD and the
+pause menu still not shown (`BT3_HUD_LOG` logged no HUD piece at all); the main menus' stutters as before. The log
+and the profile:
+- a fight's frame, about 34 ms: the game's code 9 ms, the display list 25 ms, of which the OpenGL back end 17.5 ms
+  (uploads 2.7, issuing the 2100 draws 13.4);
+- every stall, in the menus and in fights, is the file service: 95 to 100% of the stall samples in
+  `svcSendSyncRequest`, from libnx's `fsFsOpenFile` and `fsFsGetFileTimeStampRaw` (which fsdev's open asks for
+  too), opening files of `gamedata/pzs3us2` (the disc's PZS3US2.AFS unpacked: about 65,000 files in one folder).
+  On the card an open there takes 0.3 to 0.4 s (the console reads the folder from its start to find a name). The
+  menus play a spoken guide for the item chosen (`Port_FilePath` and the stream's own open, snd_adx.c), the
+  fights their fighters' lines: the online item has no guide, the one move without a stop. The game's own file
+  reads (plat_fcache.c) were not it: 0 ms in those frames.
+Changed:
+- **the packs** (plat_nxfs.c, the Switch only): a folder with `<folder>.afs` next to it (an archive of the disc's own
+  kind: "AFS\0", the number of files, an offset and a size for each) is read from it: `fopen` of
+  `<folder>/<number>.bin` for reading gives the pack's piece (`funopen`, one handle for the pack, its table read
+  once), and the folder is not looked at. `port/switch/pack_gamedata.py` (in the kit; Python 3, nothing to install)
+  makes the pack from the card's copy of the folder (or from the PC's onto the card, `--out`), checks it and with
+  `--delete` removes the folder. A slow open of a folder without a pack is said once in the log;
+- **the render thread on the Switch**, always (`BT3_GS_THREAD=0` to compare): the list and the OpenGL back end on a
+  thread of their own, pinned to core 1 (the game's thread is on core 0, the sound's on core 2), with an 8 MB stack
+  (Mesa's shader compiler runs there). 9 ms of the game beside 25 of the drawing fit in a fight's 33. With OpenGL on
+  the thread the cross-fade's snapshot of the frame is taken on that thread (a job of its own), so the fight's scene
+  changes keep their cross-fade; reading the picture back to the game is still left out;
+- `BT3_HUD_LOG`: every 30 frames, the game's markers for the HUD by kind, the primitives drawn after a side's
+  marker, those the renderer kept and those of them that are 2D with alpha 0; `BT3_GS_DUMP=hud`: the frame 300 after
+  the first HUD marker listed primitive by primitive, its markers included;
+- `bt3_env.txt` no longer offers `mesa_glthread` (slower on the console).

@@ -15,6 +15,7 @@ done
 rm -rf $K && mkdir -p $T $K/switch || exit 1
 cp -R $R/. $T/ || exit 1
 cp port/build/switch/Tenkaichi3Decomp.nro $K/switch/ || exit 1
+cp port/switch/pack_gamedata.py $K/ || exit 1
 if [ "$1" = demo ]; then
 cat > $T/bt3_env.txt <<'ENV'
 # Settings for this test (port/src/plat_mem.c, nx_start): the game's demo fight without a picture, as the PC
@@ -68,10 +69,13 @@ cat > $T/bt3_env.txt <<'ENV'
 #BT3_TEX_THREADS=0
 # Where each frame's time goes, in bt3_log.txt (for the tests of phase 4: remove the line to play without it).
 BT3_GS_VERBOSE=1
-# When the pieces of a fight's HUD are drawn, in bt3_log.txt (for the tests of phase 4).
+# What of a fight's HUD reaches the renderer, in bt3_log.txt (for the tests of phase 4).
 BT3_HUD_LOG=1
-# Mesa's OpenGL on a thread of its own (the driver's work on another core): remove the # to try it.
-#mesa_glthread=true
+# The drawing on the game's own core, as in the kits before (slower): remove the # to compare.
+#BT3_GS_THREAD=0
+# One fight frame listed piece by piece in bt3_log.txt, 10 seconds into the first fight (a test of the HUD; the
+# log grows by a few MB): remove the # in front of the next line.
+#BT3_GS_DUMP=hud
 ENV
 cat > $K/README.txt <<'TXT'
 Tenkaichi3Decomp for the Nintendo Switch - test kit: the game (phase 4 of docs/port/switch_plan.md)
@@ -86,6 +90,16 @@ its setup made from your disc). If you ran an earlier kit, the gamedata folder i
    replace the files of an earlier kit, bt3_env.txt included).
 2. If it is not there yet: copy the gamedata folder of your PC installation into
    atmosphere/contents/0100B73DEC000000/  on the card, next to Tenkaichi3Decomp.
+   Then, once, with the card in the PC: pack the folder of 65,000 files (gamedata/pzs3us2) into one file. The
+   Switch takes about 0.4 s to open a file in that folder: the stops in the menus and in fights. With Python 3 (the
+   PC setup's), in a command prompt in this kit's folder (F: is the card here):
+       python pack_gamedata.py F:\atmosphere\contents\0100B73DEC000000\gamedata --delete
+   It writes gamedata/pzs3us2.afs (the same data in one file, checked), then removes the folder (--delete; without
+   it the folder stays, unused). A few minutes. The PC installation is not changed; for the PC, the folder is
+   what counts, so do not run it with --delete on the PC's own gamedata. Instead of copying, it can also write
+   the pack from the PC's gamedata straight onto the card:
+       python pack_gamedata.py C:\path\to\Tenkaichi3Decomp\gamedata --out F:\atmosphere\contents\0100B73DEC000000\gamedata
+   (then the card's copy needs no pzs3us2 folder).
 3. On the Switch, start the homebrew menu THROUGH A GAME (hold R while starting any game), then "Tenkaichi3Decomp".
    The launcher shows a few lines while it loads the game (it says how long that took), then the screen is black
    while the game reads its data.

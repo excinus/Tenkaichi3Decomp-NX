@@ -55,6 +55,7 @@ static unsigned sPix[5]; /* per frame: outside scissor, failed alpha test, faile
 static int sDrawFrom;       /* BT3_GS_FROM=<frame>: draw only from this frame on (the reference is slow) */
 static int sProbeX = -1, sProbeY = -1;
 static int sDumpFrame = -1; /* BT3_GS_DUMP=<frame>: list that frame's primitives */
+static int sDumpHud; /* BT3_GS_DUMP=hud: the frame 300 after the first of a fight's HUD (its first side marker) */
 static unsigned sStat[8]; /* per frame: DMA tags, VIF codes, DIRECT quadwords, GIF tags, register writes, vertices, image quadwords, unknown VIF */
 
 /* ---- GS local memory: 4 MB. A buffer pointer counts 256-byte blocks, a buffer width counts 64 pixels. Where a
@@ -908,7 +909,16 @@ static void reg_write(uint32_t addr, uint64_t d) {
     case 0x51: gs.trxpos = d; break;
     case 0x52: gs.trxreg = d; break;
     case 0x53: gs.trxdir = d; transfer_begin(); break;
-    case 0x7F: if (sGpu) { GsGpu_Native((int)d); } break; /* not a GS register: the port's marker (gs_marker.c) */
+    case 0x7F: /* not a GS register: the port's marker (gs_marker.c) */
+        if (sDumpHud && sDumpFrame < 0 && d >= 0x10 && d <= 0x12) {
+            sDumpFrame = (int)sFrame + 300;
+            fprintf(stderr, "gs: the HUD's first marker in frame %u: frame %d is listed\n", sFrame, sDumpFrame);
+        }
+        if (sDumpFrame == (int)sFrame) {
+            fprintf(stderr, "  marker %02x\n", (unsigned)d);
+        }
+        if (sGpu) { GsGpu_Native((int)d); }
+        break;
     default: break;
     }
 }
@@ -1243,6 +1253,12 @@ static void race_compare(void) {
 static void *render_thread(void *arg) {
     extern void PortInput_Pump(void); /* gs_input.c */
     (void)arg;
+#ifdef __SWITCH__
+    {   /* a core of its own: the game's thread is on core 0, the sound's on core 2 (plat_nxfs.c) */
+        extern void Port_NxThreadCore(int core);
+        Port_NxThreadCore(1);
+    }
+#endif
     pthread_mutex_lock(&sLock);
     for (;;) {
         while (sJob == 0 && !sStopping) {
@@ -1266,6 +1282,9 @@ static void *render_thread(void *arg) {
         }
         if (sJob == 1) {
             sInitResult = GsGpu_Init();
+        } else if (sJob == 3) {
+            extern int GsGpu_Snapshot(uint32_t fbp); /* gs_draw.c */
+            sInitResult = GsGpu_Snapshot(sJobTadr); /* (Gs_StoreImage: the frame kept for the cross-fade) */
         } else {
             uint32_t tadr = sJobTadr;
             int tte = sJobTte;
@@ -1419,6 +1438,13 @@ static int render_thread_wanted(void) {
 #ifdef __APPLE__
     want = 0;
 #endif
+#ifdef __SWITCH__
+    /* The Switch: always (BT3_GS_THREAD=0 to compare). A fight there was 9 ms of the game and 25 of the list and
+       OpenGL's driver (measured on a console, 2026-10-30): one after the other they missed the 33 ms of a frame,
+       side by side on two cores they fit. (No setting: the settings window has no Video choice for it there.) */
+    (void)SDL_GetNumLogicalCPUCores;
+    return e != NULL ? atoi(e) != 0 : 1;
+#endif
     if (want && e == NULL && (Port_Setting("gpu_api", 0) == 1 || SDL_GetNumLogicalCPUCores() <= 2)) {
         want = 0;
     }
@@ -1434,6 +1460,7 @@ static int gs_on(void) {
         gs.prmodecont = 1; /* the GS starts with the attributes in PRIM */
         sDrawFrom = getenv("BT3_GS_FROM") != NULL ? atoi(getenv("BT3_GS_FROM")) : 0;
         sDumpFrame = getenv("BT3_GS_DUMP") != NULL ? atoi(getenv("BT3_GS_DUMP")) : -1;
+        sDumpHud = getenv("BT3_GS_DUMP") != NULL && strcmp(getenv("BT3_GS_DUMP"), "hud") == 0;
         if (getenv("BT3_GS_PROBE") != NULL) {
             sscanf(getenv("BT3_GS_PROBE"), "%d,%d", &sProbeX, &sProbeY);
         }
@@ -1441,17 +1468,31 @@ static int gs_on(void) {
             /* The render thread (setting "render_thread", F1 > Video; BT3_GS_THREAD=0/1 over it): the back end, the
                window and the list run on a thread of their own while the game computes the next tick. Not with
                OpenGL (its context is one thread's, and the game's thread asks the back end for a few things), not
-               on macOS (a window there is the main thread's), not with two logical processors or fewer. */
+               on macOS (a window there is the main thread's), not with two logical processors or fewer. On the
+               Switch always, with OpenGL (render_thread_wanted). */
             sThreaded = render_thread_wanted();
             if (sThreaded) {
+#ifdef __SWITCH__
+                /* (libnx's threads get a small stack by default; this one runs Mesa's shader compiler too) */
+                pthread_attr_t attr;
+                pthread_attr_init(&attr);
+                pthread_attr_setstacksize(&attr, 8u << 20);
+                pthread_create(&sThread, &attr, render_thread, NULL);
+                pthread_attr_destroy(&attr);
+#else
                 pthread_create(&sThread, NULL, render_thread, NULL);
+#endif
                 render_post(1, 0, 0);
                 render_wait();
                 sGpu = sInitResult;
                 atexit(render_stop);
+#ifdef __SWITCH__
+                fprintf(stderr, "bt3: render thread: the list and OpenGL on a core of their own\n");
+#else
                 if (sGpu && GsGpu_BackendIsGl()) {
                     fprintf(stderr, "bt3: render thread: the Vulkan renderer did not start; OpenGL on the thread (the game's own reads of the picture are left out)\n");
                 }
+#endif
             } else {
                 sGpu = GsGpu_Init();
             }
@@ -1763,25 +1804,36 @@ void Gs_StoreImage(unsigned bp, unsigned w, unsigned h, unsigned char *rgb) {
         fprintf(stderr, "gs: frame %u: the game reads %ux%u back from buffer %#x, row %u\n", sFrame, w, h, fbp, y0);
     }
     if (sGpu) {
-        if (Gs_RenderThreaded() && GsGpu_BackendIsGl()) {
-            return; /* (OpenGL on the render thread: its context is that thread's; the game gets black, as before) */
-        }
+        /* OpenGL on the render thread: its context is that thread's. The snapshot is taken there; the picture is
+           not read back (the game gets black, as before). */
+        int glThread = Gs_RenderThreaded() && GsGpu_BackendIsGl();
         Gs_RenderIdle(); /* (the back end is the render thread's while it runs a list) */
         {
             /* First choice: the frame stays on the card as it was drawn and the cross-fade draws from that (the
                game is handed black, which it uploads and never shows). BT3_XFADE_READ=1: the game's own way. */
             extern int GsGpu_Snapshot(uint32_t fbp);
             static unsigned snapFrame = ~0u, snapFbp = ~0u;
-            if (getenv("BT3_XFADE_READ") == NULL) {
+            if (getenv("BT3_XFADE_READ") == NULL || glThread) {
+                int took;
                 if (snapFrame == sFrame && snapFbp == fbp) {
                     return;
                 }
-                if (GsGpu_Snapshot(fbp)) {
+                if (glThread && !Gs_OnRenderThread()) {
+                    render_post(3, fbp, 0);
+                    render_wait();
+                    took = sInitResult;
+                } else {
+                    took = GsGpu_Snapshot(fbp);
+                }
+                if (took) {
                     snapFrame = sFrame;
                     snapFbp = fbp;
                     return;
                 }
             }
+        }
+        if (glThread) {
+            return;
         }
         if (keptFrame != sFrame || keptFbp != fbp) {
             if (!GsGpu_ReadFrame(fbp, kept)) {

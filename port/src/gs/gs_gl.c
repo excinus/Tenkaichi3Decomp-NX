@@ -859,6 +859,16 @@ static void frame_end(void) {
         fprintf(stderr, "gpu: frame %u: %u draws, %u vertices, %d targets, %d textures, %d pipelines, %u primitives of PS2-only passes dropped, %u native effects\n",
                 gGsFrame, gsDrawCount, gsVertCount + gsVuVertCount, gsTargetCount, gsTexCount, sPipeCount, gsSkipped, gsNative);
     }
+    if (getenv("BT3_HUD_LOG") != NULL && gGsFrame % 30 == 0) {
+        extern unsigned gHudMarks[9], gHudPrims, gHudKept, gHudClear; /* gs_draw.c */
+        extern int gPortMenuMode;                                     /* headless.c */
+        const unsigned *m = gHudMarks;
+        fprintf(stderr, "hud: frame %u (%s): markers left %u right %u centre %u end %u by place %u long bars %u %u loading %u announcement %u; "
+                        "primitives after a side's marker %u, kept %u, of them 2D with alpha 0 %u\n",
+                gGsFrame, gPortMenuMode ? "menus" : "not the menus", m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8], gHudPrims, gHudKept, gHudClear);
+        memset(gHudMarks, 0, sizeof(gHudMarks));
+        gHudPrims = gHudKept = gHudClear = 0;
+    }
     if (getenv("BT3_GPU_CUT") != NULL && (int)gGsFrame == atoi(getenv("BT3_GPU_CUT")) && strchr(getenv("BT3_GPU_CUT"), ':') != NULL) {
         uint32_t c = (uint32_t)atoi(strchr(getenv("BT3_GPU_CUT"), ':') + 1);
         fprintf(stderr, "cut: frame %u has %u draws, keeping %u\n", gGsFrame, gsDrawCount, c < gsDrawCount ? c : gsDrawCount);
