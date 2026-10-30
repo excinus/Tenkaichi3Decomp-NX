@@ -82,6 +82,12 @@ jobs:
       - name: Test kit
         run: sh port/switch/test_kit.sh
 
+      # the Windows setup (port/switch/setup), with this build's SD zip in it
+      - name: Windows setup
+        run: |
+          apt-get install -y --no-install-recommends mingw-w64 cmake
+          sh port/switch/setup/build.sh win
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -96,6 +102,12 @@ jobs:
           path: port/build/switch/test-kit
           if-no-files-found: error
           retention-days: 30
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Tenkaichi3Decomp-switch-setup
+          path: port/build/Tenkaichi3Decomp-switch-setup.exe
+          if-no-files-found: error
+          retention-days: 14
       - uses: actions/upload-artifact@v4
         with:
           name: Tenkaichi3Decomp-switch
