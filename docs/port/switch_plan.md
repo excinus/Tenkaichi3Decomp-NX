@@ -266,7 +266,9 @@ or a mode that skips drawing frames.
 ## Releases (phase 5)
 
 All in this fork's GitHub Actions; the original repository's `release.yml` and `macos.yml` are not in the fork (it
-publishes no PC or Mac builds), and every merge of the original keeps the fork's `.github/workflows` as they are.
+publishes no PC or Mac builds), and every merge of the original keeps the fork's `.github/workflows` and
+`README.md` as they are. One branch, the default (its name does not matter to the workflows), holds the Switch
+port.
 
 - **Numbers**: `v<the original's version>-nx<n>`, the n-th Switch release of that version: `v0.1.39.2-nx1`, a fix
   `v0.1.39.2-nx2`, the original's next `v0.1.40-nx1`. The game compares them as five numbers
@@ -280,16 +282,16 @@ publishes no PC or Mac builds), and every merge of the original keeps the fork's
   release exists).
 - **The build** (`switch-build.yml`, `port/switch/release/build.sh`): SDL3, the game, the launcher (its version in
   the homebrew menu is the release's), `package.py` (both zips), the signature.
-- **A release by hand** (`switch-release.yml`, Actions > switch-release > Run workflow): main (or the branch chosen),
+- **A release by hand** (`switch-release.yml`, Actions > switch-release > Run workflow): the default branch (or the one chosen),
   the next number unless one is typed, notes typed in, optionally a pre-release. The notes
   (`port/switch/release/notes.sh`) say which version of the original it is, how to install, and the fork's own
   changes since the last Switch release; the game shows them as "What's new".
 - **Following the original** (`follow-upstream.yml`, every 6 hours or by hand): its newest published release, when
-  main does not have it, is merged; a conflict opens an issue (label `upstream-follow`) and nothing is pushed. The
+  the default branch does not have it, is merged; a conflict opens an issue (label `upstream-follow`) and nothing is pushed. The
   merge is built, and so is the last Switch release's tree, at the same path with the same number and key (the
   build is reproducible: two builds of one source were the same file for file, 2026-10-30), and the two are
   compared (`port/switch/release/compare.py`). Then:
-  - **skip**: the Switch's files are the same: the merge goes to main, nothing is published;
+  - **skip**: the Switch's files are the same: the merge goes to the branch, nothing is published;
   - **pre-release**: `port/switch/release/classify.py` names a reason to look first (the original changed lines within
     25 of the fork's own changes in the same file, both seen from their common commit, even where git merged them
     without a conflict; the build's tools; new files in `port/src`; more than 4000 lines of code), or the program now

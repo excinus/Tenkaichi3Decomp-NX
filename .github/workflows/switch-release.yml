@@ -1,6 +1,6 @@
 # A release of the Switch's build by hand (docs/port/switch_plan.md, phase 5): GitHub > Actions > switch-release >
-# Run workflow. It builds main (or the branch chosen there) with switch-build.yml and publishes this fork's release:
-#   the tag v<the original's version>-nx<n>: the n-th Switch release of the original repository's version that main
+# Run workflow. It builds the branch chosen there (the default) with switch-build.yml and publishes this fork's release:
+#   the tag v<the original's version>-nx<n>: the n-th Switch release of the original repository's version that it
 #   has (v0.1.39.2-nx1, then -nx2 for a fix...), unless one is typed in;
 #   its files: Tenkaichi3Decomp-switch-SD.zip (a first install), Tenkaichi3Decomp-switch.zip and its .sig (the game's
 #   automatic update), and notes (port/switch/release/notes.sh).

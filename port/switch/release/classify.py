@@ -52,8 +52,8 @@ def main():
     up, mine = changed(args.base, args.upstream), changed(args.base, args.fork)
     reasons = []
     for path in sorted(up.keys() & mine.keys()):
-        if path.startswith(".github/"):
-            continue  # (the fork's workflows are its own: the merge keeps them)
+        if path.startswith(".github/") or path == "README.md":
+            continue  # (the fork's workflows and README are its own: the merge keeps them)
         theirs, ours = hunks(args.base, args.upstream, path), hunks(args.base, args.fork, path)
         near = [(t, o) for t in theirs for o in ours if t[0] - MARGIN <= o[1] and o[0] - MARGIN <= t[1]]
         if near:
