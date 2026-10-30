@@ -35,6 +35,10 @@ Joy-Con uses SL as ZL, SR as R, and its top buttons as L and ZR; its stick also 
 
 **Known issues**: two-player split screen runs at about 20 fps; online play is not available yet.
 
+Tested on a Switch OLED; the V1, V2 and Lite run the same program. sys-clk keeps the GPU lower where it judges the
+battery at risk: on a **V1 unplugged** it allows 460 MHz (614 on the others), which may cost some speed in fights
+there; plugging in (or the dock) lifts it.
+
 ## Installation
 
 You need:
