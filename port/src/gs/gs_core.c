@@ -1184,6 +1184,8 @@ static int sThreaded;
 static int sJob;            /* 0 none, 1 start the GPU back end, 2 run a list */
 static uint32_t sJobTadr;
 static int sJobTte, sInitResult;
+static uint32_t sJobQwc; /* job 4, a GIF channel transfer: its size (Port_GsGifChannel) */
+static void gif_channel(uint32_t addr, uint32_t qwc, int chain);
 static int sStopping; /* the program is ending: the render thread leaves its loop (render_stop) */
 static int sListDone; /* the list being run has been drawn and its first picture shown (Smooth motion's others may follow) */
 static void run_chain(uint32_t tadr, int tte);
@@ -1285,6 +1287,8 @@ static void *render_thread(void *arg) {
         } else if (sJob == 3) {
             extern int GsGpu_Snapshot(uint32_t fbp); /* gs_draw.c */
             sInitResult = GsGpu_Snapshot(sJobTadr); /* (Gs_StoreImage: the frame kept for the cross-fade) */
+        } else if (sJob == 4) {
+            gif_channel(sJobTadr, sJobQwc, sJobTte); /* (Port_GsGifChannel, OpenGL on this thread) */
         } else {
             uint32_t tadr = sJobTadr;
             int tte = sJobTte;
@@ -1459,8 +1463,8 @@ static int gs_on(void) {
         tables_init();
         gs.prmodecont = 1; /* the GS starts with the attributes in PRIM */
         sDrawFrom = getenv("BT3_GS_FROM") != NULL ? atoi(getenv("BT3_GS_FROM")) : 0;
-        sDumpFrame = getenv("BT3_GS_DUMP") != NULL ? atoi(getenv("BT3_GS_DUMP")) : -1;
         sDumpHud = getenv("BT3_GS_DUMP") != NULL && strcmp(getenv("BT3_GS_DUMP"), "hud") == 0;
+        sDumpFrame = getenv("BT3_GS_DUMP") != NULL && !sDumpHud ? atoi(getenv("BT3_GS_DUMP")) : -1;
         if (getenv("BT3_GS_PROBE") != NULL) {
             sscanf(getenv("BT3_GS_PROBE"), "%d,%d", &sProbeX, &sProbeY);
         }
@@ -1504,14 +1508,27 @@ static int gs_on(void) {
 /* A transfer on the GIF channel itself (the game uses it for texture uploads outside the frame's list):
    `qwc` quadwords of GIF data at `addr`, or with chain = 1 a source chain of them starting at `addr`. */
 void Port_GsGifChannel(uint32_t addr, uint32_t qwc, int chain) {
-    int guard;
-
     if (!gs_on()) {
         return;
     }
     if (sThreaded) {
         render_wait(); /* the GS is one device: this transfer goes after the list that is being drawn */
+        if (sGpu && GsGpu_BackendIsGl() && !pthread_equal(pthread_self(), sThread)) {
+            /* OpenGL on the render thread: its context is that thread's, and a transfer can draw (the game clears
+               its frame buffers this way) and make targets. Carried out there, the game's thread waiting. (On the
+               Switch, done here: the targets made without a context, nothing was ever shown.) */
+            sJobQwc = qwc;
+            render_post(4, addr, chain);
+            render_wait();
+            return;
+        }
     }
+    gif_channel(addr, qwc, chain);
+}
+
+static void gif_channel(uint32_t addr, uint32_t qwc, int chain) {
+    int guard;
+
     if (!chain) {
         Gs_Gif((const uint8_t *)Port_Ptr(addr), qwc);
         return;
