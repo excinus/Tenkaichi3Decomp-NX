@@ -1209,8 +1209,8 @@ extern int gGsMainFbp, gGsMainFbpGame;
 extern uint64_t gGpuEndNs; /* gs_draw.c */
 /* BT3_GS_VERBOSE: the game's thread waiting for the render thread (the GIF channel's transfers, the end of a tick
    before its list is handed over, anything else), and the render thread's own time per list, drawn or skipped. */
-static uint64_t sWaitNs[3], sListNs[2], sListEndNs[2];
-static unsigned sWaitCount[3], sGifCount, sListCount[2];
+static uint64_t sWaitNs[4], sListNs[2], sListEndNs[2];
+static unsigned sWaitCount[4], sGifCount, sListCount[2];
 static uint64_t now_ns(void);
 static void gif_channel(uint32_t addr, uint32_t qwc, int chain);
 static int sStopping; /* the program is ending: the render thread leaves its loop (render_stop) */
@@ -1398,12 +1398,21 @@ static void render_stop(void) {
    older by the drawing's time when its picture came (2.4 ms measured at 2x). A game that is behind does not wait
    here: then the drawing beside the game's work is what the thread is for. */
 void Gs_RenderListWait(void) {
-    if (!sThreaded || pthread_equal(pthread_self(), sThread)) {
-        return;
+    extern int GsDraw_SkippedRecently(void); /* gs_draw.c */
+    uint64_t t0 = 0;
+    if (!sThreaded || pthread_equal(pthread_self(), sThread) || GsDraw_SkippedRecently()) {
+        return; /* (ticks being left out: the drawing beside the game's work is needed, see GsDraw_SkippedRecently) */
     }
     pthread_mutex_lock(&sLock);
+    if (sJob == 2 && !sListDone) {
+        t0 = now_ns();
+    }
     while (sJob == 2 && !sListDone) {
         pthread_cond_wait(&sDone, &sLock);
+    }
+    if (t0 != 0) {
+        sWaitNs[3] += now_ns() - t0;
+        sWaitCount[3]++;
     }
     pthread_mutex_unlock(&sLock);
 }
@@ -1690,9 +1699,9 @@ void Port_GsVif1Chain(uint32_t tadr, int tte) {
             if (getenv("BT3_GS_VERBOSE") != NULL && sThreaded) {
                 pthread_mutex_lock(&sLock);
                 fprintf(stderr, "time:   the game's thread waited for the render thread: %.1f ms per frame in %u of %u GIF channel transfers, "
-                                "%.1f at %u of 60 frames' ends, %.1f elsewhere (%u); the render thread: %u lists drawn, %.1f ms each "
+                                "%.1f at %u of 60 frames' ends, %.1f before reading the pads (%u), %.1f elsewhere (%u); the render thread: %u lists drawn, %.1f ms each "
                                 "(of it ending the frame %.1f), %u skipped, %.1f ms each\n",
-                        (double)sWaitNs[0] / 60e6, sWaitCount[0], sGifCount, (double)sWaitNs[1] / 60e6, sWaitCount[1], (double)sWaitNs[2] / 60e6,
+                        (double)sWaitNs[0] / 60e6, sWaitCount[0], sGifCount, (double)sWaitNs[1] / 60e6, sWaitCount[1], (double)sWaitNs[3] / 60e6, sWaitCount[3], (double)sWaitNs[2] / 60e6,
                         sWaitCount[2], sListCount[0], sListCount[0] ? (double)sListNs[0] / sListCount[0] / 1e6 : 0.0,
                         sListCount[0] ? (double)sListEndNs[0] / sListCount[0] / 1e6 : 0.0, sListCount[1],
                         sListCount[1] ? (double)sListNs[1] / sListCount[1] / 1e6 : 0.0);

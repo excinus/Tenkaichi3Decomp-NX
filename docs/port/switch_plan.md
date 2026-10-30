@@ -706,3 +706,15 @@ Changed:
   (gs_sony.c `gGsMainFbpGame`, gs_core.c `sJobFbp`);
 - `BT3_GS_VERBOSE`: per 60 frames, the game's thread's waits for the render thread (in GIF channel transfers, at
   the frame's end, elsewhere) and the render thread's time per drawn and per skipped list, of it ending the frame.
+
+The kit of commit 5e79e35, the stock clock: the pacing and the HUD right ("no inconsistencies"), 10 to 15 pictures
+a second. The new timing: the game's thread waited for the render thread only 0 to 3.5 ms a frame at the sites
+timed (GIF channel transfers, the frame's end); the render thread 41 ms per drawn list (27 of it ending the frame),
+5 ms per skipped one, idle about 40% of the time; yet the game's thread was 42% in a condition wait. That is the pad
+read's wait for the drawing of the last list (Gs_RenderListWait, when the last blank was waited for): after skipped
+ticks the game is ahead of its grid, waits there for the render thread, and then computes its tick while the render
+thread has nothing to do. Changed:
+- no wait before the pad read while ticks are being left out (one in the last 60, gs_draw.c
+  `GsDraw_SkippedRecently`); its time is in the `BT3_GS_VERBOSE` line with the other waits.
+At 41 ms per drawn list and 5 per skipped one the render thread can show about 23 of the 30 ticks a second; 30 at the
+stock clock needs the list's walk (about 14 ms) off the thread that issues OpenGL's draws.

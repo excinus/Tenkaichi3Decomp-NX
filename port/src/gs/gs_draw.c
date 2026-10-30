@@ -4861,6 +4861,14 @@ int gsSkipFrame;
 static int sSkipOn = -1, sSkipRun;
 static unsigned sSkipped; /* (BT3_GS_VERBOSE) */
 
+/* A tick was left out in the last 60: the machine is not keeping up, and the pad read does not wait for the render
+   thread's drawing (gs_core.c, Gs_RenderListWait): waiting there left the render thread idle while the game then
+   computed its tick, at the Switch's stock clock 40% of the game's thread. */
+static unsigned sSkipLastFrame;
+int GsDraw_SkippedRecently(void) {
+    return sSkipLastFrame != 0 && gGsFrame - sSkipLastFrame < 60;
+}
+
 int GsDraw_FrameSkip(void) {
     if (sSkipOn < 0) {
         sSkipOn = getenv("BT3_FRAME_SKIP") != NULL ? atoi(getenv("BT3_FRAME_SKIP")) != 0 : Port_Setting("frame_skip", 1) != 0;
@@ -4888,6 +4896,9 @@ static void skip_decide(void) {
     (void)gPortNetWindowClose;
     sSkipRun = skip ? sSkipRun + 1 : 0;
     sSkipped += (unsigned)skip;
+    if (skip) {
+        sSkipLastFrame = gGsFrame ? gGsFrame : 1;
+    }
     gsSkipFrame = skip;
     if (getenv("BT3_GS_VERBOSE") != NULL && gGsFrame % 120 == 0 && sSkipped != 0) {
         fprintf(stderr, "skip: %u ticks were not shown in the last 120 pictures (the game was %d.%d ms behind just now)\n", sSkipped, behind / 1000, behind / 100 % 10);
