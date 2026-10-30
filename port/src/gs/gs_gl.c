@@ -1055,7 +1055,7 @@ static void frame_end(void) {
     sRanged[0] = sRanged[1] = 0;
     tEnd[1] = SDL_GetTicksNS();
     for (i = 0; i < 2; i++) {
-        uint32_t *px, x, y, fbp = i ? 0x70 : 0;
+        uint32_t *px, fbp = i ? 0x70 : 0;
         if (!(gGsFbUploads & (1u << i))) { continue; }
         if (sFbTex[i] == 0) {
             glGenTextures(1, &sFbTex[i]);
@@ -1066,11 +1066,7 @@ static void frame_end(void) {
             glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, sFbTex[i], 0);
         }
         px = malloc((size_t)GS_W * GS_H * 4);
-        for (y = 0; y < GS_H; y++) {
-            for (x = 0; x < GS_W; x++) {
-                px[y * GS_W + x] = Gs_VramRead(fbp * 32, 8, 0, x, y) | 0xFF000000u;
-            }
-        }
+        Gs_FrameRead32(fbp * 32, 8, GS_W, GS_H, px);
         glBindTexture(GL_TEXTURE_2D, sFbTex[i]);
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, GS_W, GS_H, GL_RGBA, GL_UNSIGNED_BYTE, px);
         free(px);

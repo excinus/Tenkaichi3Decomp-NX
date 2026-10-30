@@ -164,6 +164,25 @@ static uint32_t vram_rw(uint32_t bp, uint32_t bw, uint32_t psm, uint32_t x, uint
     }
 }
 
+/* A 32-bit buffer's w x h pixels (w and h multiples of 8), rows top first, with alpha set to 0xFF: as Gs_VramRead
+   pixel by pixel, a block of 8 x 8 at a time. (A movie picture's copy at the end of the frame, 512 x 448: pixel by
+   pixel it was 44% of the render thread's time while the intro movie played on the Switch.) */
+void Gs_FrameRead32(uint32_t bp, uint32_t bw, uint32_t w, uint32_t h, uint32_t *out) {
+    uint32_t x, y, xx, yy;
+
+    for (y = 0; y < h; y += 8) {
+        for (x = 0; x < w; x += 8) {
+            const uint32_t *blk = (const uint32_t *)Gs_BlockPtr(bp, bw, 0, x, y);
+            for (yy = 0; yy < 8; yy++) {
+                uint32_t *row = out + (y + yy) * w + x;
+                for (xx = 0; xx < 8; xx++) {
+                    row[xx] = blk[kCol32[yy][xx]] | 0xFF000000u;
+                }
+            }
+        }
+    }
+}
+
 const uint8_t *Gs_BlockPtr(uint32_t bp, uint32_t bw, uint32_t psm, uint32_t x, uint32_t y) {
     uint32_t bn;
 

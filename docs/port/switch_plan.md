@@ -679,3 +679,16 @@ picture or none. Changed:
 - `MESA_NO_ERROR=1` on the Switch (Mesa without its per-call error checks; no GL error in any run since the
   black-screen kit); `MESA_NO_ERROR=0` in bt3_env.txt to compare;
 - the launcher is named "Dragon Ball Z: Budokai Tenkaichi 3"; the NSP is dropped (see "The NSP").
+
+The kit of commit e4b61c9, two runs. Overclocked: fights perfect; the intro movie at 20-26 pictures a second with a
+slight flicker (less than before). Stock clock: the intro movie at 6 pictures a second without any flicker; fights
+uneven, the HUD seeming to jump (the player's video: the HUD in place and whole in every picture, its own animations
+seen at uneven intervals, about half of the ticks not shown). The render thread's profile, during the movie
+(overclocked): 44% in frame_end's copy of the movie's picture out of GS memory (gs_gl.c, `Gs_VramRead` pixel by
+pixel, 1024 x 1024 of them per upload); the game's thread decoding the MPEG-2 (plat_mpeg2.c, integer only) and
+sleeping the rest. In the overclocked fight the render thread waited 58% of the time. No 30-second report covered
+the stock fight. Changed:
+- `Gs_FrameRead32` (gs_core.c): a 32-bit buffer read a block of 8 x 8 pixels at a time (one address per block, the
+  column table within it), checked equal to the pixel-by-pixel reading over the whole 1024 x 1024; both back ends'
+  copies of an uploaded picture use it;
+- the render thread's profile every 10 s (the game thread's stays at 30 s).

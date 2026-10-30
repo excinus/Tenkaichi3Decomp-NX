@@ -611,9 +611,11 @@ static void watch_line(const char *what, unsigned t, unsigned late, int report) 
         at += NxTrace_Report(text + at, sizeof(text) - at);
         at += prof_report(PROF_STALL, "the game's thread in stalls (offsets from __start__)", text + at, sizeof(text) - at);
         at += prof_report(PROF_STALL_LR, "  and its return addresses then", text + at, sizeof(text) - at);
-        if (report == 2) {
+        if (report & 2) {
             at += prof_report(PROF_ALL, "the game's thread, the last 30 s (offsets from __start__)", text + at, sizeof(text) - at);
-            at += prof_report(PROF_RENDER, "the render thread, the last 30 s", text + at, sizeof(text) - at);
+        }
+        if (report & 4) {
+            at += prof_report(PROF_RENDER, "the render thread, the last 10 s", text + at, sizeof(text) - at);
             at += prof_report(PROF_RENDER_LR, "  and its return addresses", text + at, sizeof(text) - at);
         }
     }
@@ -666,8 +668,9 @@ static void nx_watch(void *arg) {
         }
         if (++n % 4 == 0) { /* (every 2 seconds) */
             unsigned long long total = NxFs_Total();
-            if (t < 180000 || ticks >= 4 || total - before > 4000 || n % 60 == 0) {
-                watch_line(ticks >= 4 ? "nothing drawn" : "running", t, late, n % 60 == 0 ? 2 : 1);
+            if (t < 180000 || ticks >= 4 || total - before > 4000 || n % 20 == 0) {
+                /* (report: 1 the line, 2 the game's thread's 30 s, 4 the render thread's 10 s) */
+                watch_line(ticks >= 4 ? "nothing drawn" : "running", t, late, 1 | (n % 60 == 0 ? 2 : 0) | (n % 20 == 0 ? 4 : 0));
             } else {
                 NxFs_Report(NULL, 0, 2000); /* (the counts start again for the next report) */
             }

@@ -1218,7 +1218,7 @@ static void vk_frame_end(void) {
         SDL_GPUTextureTransferInfo src;
         SDL_GPUTextureRegion dst;
         SDL_GPUTransferBuffer *tb;
-        uint32_t *px, x, y, fbp = i ? 0x70 : 0;
+        uint32_t *px, fbp = i ? 0x70 : 0;
         if (!(gGsFbUploads & (1u << i))) {
             continue;
         }
@@ -1239,11 +1239,7 @@ static void vk_frame_end(void) {
         ti.size = GS_W * GS_H * 4;
         tb = SDL_CreateGPUTransferBuffer(sDev, &ti);
         px = SDL_MapGPUTransferBuffer(sDev, tb, false);
-        for (y = 0; y < GS_H; y++) {
-            for (x = 0; x < GS_W; x++) {
-                px[y * GS_W + x] = Gs_VramRead(fbp * 32, 8, 0, x, y) | 0xFF000000u;
-            }
-        }
+        Gs_FrameRead32(fbp * 32, 8, GS_W, GS_H, px);
         SDL_UnmapGPUTransferBuffer(sDev, tb);
         SDL_zero(src);
         src.transfer_buffer = tb;
