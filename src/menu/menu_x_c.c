@@ -43,8 +43,8 @@ s32 Option_Init(s32 section) {
     gOption->res = Sprite_Unpack(gOption->pack, NULL, NULL);
 #if defined(PORT) && defined(__SWITCH__)
     { /* the controller page's picture: a pair of Joy-Con, not a DualShock 2 (port/src/plat_nxart.c) */
-        extern void Port_NxOptionArt(void *res);
-        Port_NxOptionArt(gOption->res);
+        extern void Port_NxOptionArt(void *res, u32 size);
+        Port_NxOptionArt(gOption->res, gOption->pack[0]); /* (the pack's first word: its size unpacked) */
     }
 #endif
     /*

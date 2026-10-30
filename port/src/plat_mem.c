@@ -653,6 +653,10 @@ static void nx_watch(void *arg) {
             fflush(stderr);
             funlockfile(stderr);
         }
+        {
+            extern void Port_NxClockTick(void); /* plat_nxclock.c: the GPU's clock follows the console in or out of its dock */
+            Port_NxClockTick();
+        }
         if (sLogFd[0] >= 0) {
             fsync(sLogFd[0]);
         }

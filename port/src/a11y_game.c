@@ -2953,6 +2953,12 @@ static A11yBtlMenu GAME_PTR btl_menu_shown(void) {
     return m->count > 0 && m->count < 64 ? m : NULL;
 }
 
+/* For the Switch's Nintendo layout (gs/gs_input.c, menu_ab): 1 while a menu of the battle takes input, the pause menu
+   or the one after the fight, as btl_menu_shown finds it. */
+int Port_BattleMenuOpen(void) {
+    return btl_menu_shown() != NULL;
+}
+
 /* 1: the menu is the skill list or the controls page, which are not a list of items (left to shown_text). */
 static int btl_menu_page(A11yBtlMenu GAME_PTR m) {
     return m->items[0].type == BTL_MENU_ITEM_SKILLS || m->items[0].type == BTL_MENU_ITEM_CONTROLS;

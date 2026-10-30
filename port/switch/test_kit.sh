@@ -89,8 +89,9 @@ before; what does not work yet is what this test is for.
 
 What you need: a Switch with Atmosphere, and your PC installation of Tenkaichi3Decomp (its gamedata folder, which
 its setup made from your disc). If you ran an earlier kit, the gamedata folder is already on the card.
-The CPU overclocked to 1785 MHz with sys-clk (a profile for the title the game runs as) is REQUIRED for full speed:
-fights at the stock 1020 MHz reach 16 to 20 pictures a second and their pacing is uneven.
+sys-clk is REQUIRED for full speed: with it installed the game sets the clocks it needs by itself while it runs
+(CPU 1785 MHz, memory 1600 MHz, GPU 614 MHz in the hand) and gives them back when it ends; no profile to make.
+Without it fights at the stock clocks reach 16 to 20 pictures a second and their pacing is uneven.
 
 1. Copy this kit's folders to the root of the SD card: atmosphere/ and switch/ (they merge with what is there;
    replace the files of an earlier kit, bt3_env.txt included).

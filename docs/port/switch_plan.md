@@ -774,3 +774,20 @@ The game's own Options > Controller page and local duels (2026-10-30, the player
   and trigger as ZL / ZR, its - or + as +, its own rumble. (Whether the system already turns a sideways Joy-Con is
   not known: libnx reads hid's states as they are; a left Joy-Con alone giving A, B, X or Y is taken to mean it does,
   and the log says so.)
+
+The kit of commit c4b1349: the Joy-Con on the controller page (looking squashed on a 16:9 page), the Nintendo layout
+right except in a fight's pause menu, local duels right both ways (a Joy-Con each, two controllers), HOME, sleep and
+the dock right. Split screen overclocked: 20 pictures a second, even. Changed:
+- the Joy-Con picture 116 texels high, in two shapes (a 4:3 and a 16:9 page: a texel is 1.17 or 1.56 times as wide as
+  high there), the page's own taken (plat_nxart.c, Port_PageAspectMilli);
+- the Nintendo layout also in a fight's own menus (a11y_game.c Port_BattleMenuOpen: the pause menu, the one after the
+  fight), a button held as the layout changes left out until let go, and on by default;
+- a Joy-Con alone, sideways: its stick is the d-pad too in the menus (it has none; the characters' choice is moved
+  through with the d-pad only);
+- Controls: one button left, the console's Controllers screen for one player (the pair joined again after a duel);
+  the duel menu shows the two-player one by itself;
+- sys-clk: the game sets CPU 1785 MHz, memory 1600 MHz and in the hand GPU 614 MHz through sys-clk's service
+  (temporary overrides, `port/src/plat_nxclock.c`), and takes them back at its end (closing from HOME included:
+  appletLockExit); the Video tab's "Overclock while playing (sys-clk)", on by default;
+- the game's button icons (boot file member 8) and the options screen's pack are written once beside the log
+  (bt3_art_icons.bin, bt3_art_options.bin) for redrawing the icons with the Switch's letters.

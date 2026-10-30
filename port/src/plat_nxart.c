@@ -42,12 +42,51 @@ static uint64_t rd64(const uint8_t *p) {
     return v;
 }
 
-void Port_NxOptionArt(void *res) {
+/* For redrawing the game's button icons (2026-10-30): the bytes they are made from, once, beside bt3_log.txt (sent by
+   the player; read with the PS Vita port's tools/bt3tex.py). Written only when the file is not there yet. */
+static void dump_once(const char *name, const void *p, uint32_t size) {
+    FILE *f = fopen(name, "rb");
+    if (f != NULL) {
+        fclose(f);
+        return;
+    }
+    if (p == NULL || size == 0 || size > (16u << 20) || (f = fopen(name, "wb")) == NULL) {
+        return;
+    }
+    fwrite(p, 1, size, f);
+    fclose(f);
+    fprintf(stderr, "bt3: art: %s written (%u bytes)\n", name, (unsigned)size);
+}
+
+/* The boot file (src/battle/col_c_b.c FontIcon_Init), before its member 8, the button icons of the game's text, is
+   bound: that member, kept for redrawing the icons. */
+void Port_NxIconArt(void *boot) {
+    uint8_t *b = boot;
+    uint32_t n, from, to;
+    if (b == NULL || (n = rd32(b)) < 8 || n > 64) {
+        return;
+    }
+    from = (rd32(b + 8 * 4) >> 2) << 2;
+    to = n > 8 ? (rd32(b + 9 * 4) >> 2) << 2 : from + (256u << 10);
+    if (to > from) {
+        dump_once("bt3_art_icons.bin", b + from, to - from);
+    }
+}
+
+/* res: the options screen's pack, unpacked, of `size` bytes. */
+void Port_NxOptionArt(void *res, uint32_t size) {
+    extern int Port_PageAspectMilli(void); /* plat_stub.c: the shape of the page the menus are shown on */
     uint8_t *pack = res, *sec, *e, *pixels, *palette;
-    uint32_t pix, pal, blt, uw, uh, dbw, tbw, x, y, i, k;
+    uint32_t pix, pal, blt, uw, uh, dbw, tbw, x, y, i, k, v = 0;
     uint64_t tex0, reg;
     int32_t *gs, *at;
 
+    dump_once("bt3_art_options.bin", res, size);
+    for (i = 1; i < sizeof(kJoyconPage) / sizeof(kJoyconPage[0]); i++) { /* the picture made for the nearest shape */
+        if (abs(kJoyconPage[i] - Port_PageAspectMilli()) < abs(kJoyconPage[v] - Port_PageAspectMilli())) {
+            v = i;
+        }
+    }
     if (pack == NULL || rd32(pack) < 38) {
         fprintf(stderr, "bt3: optart: not the options screen's pack, left alone\n");
         return;
@@ -100,14 +139,14 @@ void Port_NxOptionArt(void *res) {
         }
     }
     for (i = 0; i < 128 * 128; i++) {
-        pixels[at[i]] = kJoyconIdx[i];
+        pixels[at[i]] = kJoyconIdx[v][i];
     }
     for (i = 0; i < 256; i++) { /* the palette in the GS's order of 256-colour palettes (entries 8..15 and 16..23 swapped) */
         uint32_t j = (i & 0xE7) | ((i & 8) << 1) | ((i & 16) >> 1);
-        memcpy(palette + j * 4, kJoyconPal[i], 4);
+        memcpy(palette + j * 4, kJoyconPal[v][i], 4);
     }
     free(gs);
     free(at);
-    fprintf(stderr, "bt3: optart: the controller page shows the Joy-Con\n");
+    fprintf(stderr, "bt3: optart: the controller page shows the Joy-Con (drawn for a page of %d.%03d)\n", kJoyconPage[v] / 1000, kJoyconPage[v] % 1000);
 }
 #endif

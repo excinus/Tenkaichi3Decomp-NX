@@ -78,6 +78,8 @@ int Port_MenuAbSwap(void);                     // gs_input.c: the Switch's A cho
 void Port_MenuAbSwapSet(int on);
 #ifdef __SWITCH__
 int Port_NxControllers(int players);           // plat_nxpad.c: the console's Controllers screen
+void Port_NxClockSet(int on);                  // plat_nxclock.c: the game's clocks through sys-clk
+int Port_NxClockThere(void);
 #endif
 int Port_ClashSquareX(void);                   // what a press is worth, in quarters of a point (4, 6, 7, 8)
 void Port_ClashSquareXSet(int quarters);
@@ -1410,6 +1412,21 @@ static void video_tab(PortVideo &v) {
 #endif
     }
 #ifdef __SWITCH__
+    {   // the clocks the game needs, through sys-clk (plat_nxclock.c)
+        bool oc = Port_Setting("sysclk_overclock", 1) != 0;
+        ImGui::BeginDisabled(!Port_NxClockThere());
+        if (ImGui::Checkbox("Overclock while playing (sys-clk)", &oc)) {
+            Port_SettingSave("sysclk_overclock", oc ? 1 : 0);
+            Port_SettingsWrite();
+            Port_NxClockSet(oc);
+        }
+        ImGui::EndDisabled();
+        ImGui::SetItemTooltip(Port_NxClockThere() ?
+                              "CPU 1785 MHz, memory 1600 MHz and in the hand GPU 614 MHz while the game runs, back to\n"
+                              "sys-clk's own when it ends. Fights need it for a steady 30 pictures a second. On by default." :
+                              "sys-clk is not installed: the game runs at the stock clocks (fights at 16 to 20 pictures\n"
+                              "a second). With sys-clk the game sets the clocks it needs by itself.");
+    }
     // (one display, and one renderer: SDL is built for the Switch with OpenGL through Mesa only, no Vulkan)
     (void)count;
     ImGui::TextWrapped("Renderer: OpenGL. Active GPU: %s", sGpuName);
@@ -2425,22 +2442,16 @@ static void build(void) {
                     Port_MenuAbSwapSet(ab);
                 }
                 ImGui::SetItemTooltip("The game's menus choose with Cross and go back with Triangle: on the Switch B and X.\n"
-                                      "With this on, outside a fight A chooses and B goes back (and X is Circle), in these\n"
-                                      "windows too. Fights, the pause menu included, keep the buttons below.");
-                {   // the console's Controllers screen (port/src/plat_nxpad.c): who holds which controller
-                    if (ImGui::Button("Controllers: 1 player")) {
-                        Port_NxControllers(1);
-                    }
-                    ImGui::SetItemTooltip("The console's Controllers screen for one player: the console in the hand, a pair of\n"
-                                          "Joy-Con or another controller (after two players played on one Joy-Con each).");
-                    ImGui::SameLine();
-                    if (ImGui::Button("Controllers: 2 players")) {
-                        Port_NxControllers(2);
-                    }
-                    ImGui::SetItemTooltip("The console's Controllers screen for two: a Joy-Con each, held sideways, or a second\n"
-                                          "controller. The first is player 1, the second player 2. The duel menu's 1P vs 2P\n"
-                                          "shows it by itself.");
+                                      "With this on, in the menus and a fight's pause menu A chooses and B goes back (and X\n"
+                                      "is Circle), in these windows too. The fight itself keeps the buttons below. On by default.");
+                // the console's Controllers screen (port/src/plat_nxpad.c): the duel menu's 1P vs 2P shows it for two players by
+                // itself; this is for going back to one, the two Joy-Con as a pair again (they stay apart until it is shown)
+                if (ImGui::Button("Join the Joy-Con again (one player)")) {
+                    Port_NxControllers(1);
                 }
+                ImGui::SetItemTooltip("After a duel on one Joy-Con each: the console's Controllers screen, to hold the two as\n"
+                                      "one controller again (or to use the console in the hand, or another controller).\n"
+                                      "Not needed when the Joy-Con are put back on the console.");
 #endif
                 ImGui::Separator();
                 controls_tab();
