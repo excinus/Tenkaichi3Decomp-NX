@@ -1,31 +1,47 @@
 #!/bin/sh
 # Builds the Switch setup (port/switch/setup: setup.cpp, work.cpp, and the PC setup's native.cpp in it; docs/port/
-# switch_plan.md, "The setup"), with SDL3 linked in (built here as a static library), and puts the release's SD zip
-# at its end: one program to put anywhere.
+# switch_plan.md, "The setup") with SDL3 linked in (built here as a static library), then the release's zip for that
+# system (zip.py): the setup beside the Switch's files.
 #
-#   port/switch/setup/build.sh win <SD zip>  -> port/build/Tenkaichi3Decomp-switch-setup.exe   (mingw-w64, posix threads)
-#   port/switch/setup/build.sh [<SD zip>]    -> port/build/Tenkaichi3Decomp-switch-setup        (this Linux, for tests)
+#   port/switch/setup/build.sh win     -> port/build/Tenkaichi3Decomp-switch-windows.zip   (mingw-w64, posix threads)
+#   port/switch/setup/build.sh linux   -> port/build/Tenkaichi3Decomp-switch-linux.zip     (X11/Wayland headers needed)
+#   port/switch/setup/build.sh mac     -> port/build/Tenkaichi3Decomp-switch-macos.zip     (on a Mac: Xcode's clang,
+#                                         arm64 and x86_64 in one program)
+#   port/switch/setup/build.sh test    -> port/build/switch-setup-test/setup  (this Linux, no window: --install only)
 #
 # Needs cmake and the compiler; SDL's source is the one port/switch/sdl3/build.py downloads (port/build/nx/
-# SDL3-<version>.tar.gz), fetched here when it is missing. The zip: port/build/Tenkaichi3Decomp-switch.zip
-# (BT3_CC=nx64 port/tools/package.py), followed by a trailer: "BT3NXSD1" and its size (8 bytes, little-endian).
+# SDL3-<version>.tar.gz), fetched here when it is missing. The Switch's files: port/build/Tenkaichi3Decomp-switch.zip
+# (BT3_CC=nx64 port/tools/package.py).
 set -e
 cd "$(dirname "$0")/../../.."
 V=${SDL_VERSION:-3.4.12}
 I=port/third_party/imgui
-if [ "$1" = win ]; then
-    T=win; shift
+T=${1:-test}
+EXE=setup
+FLAGS=""
+case $T in
+win)
     CXX=$(command -v x86_64-w64-mingw32-g++-posix || command -v x86_64-w64-mingw32-g++)
     CC=$(command -v x86_64-w64-mingw32-gcc-posix || command -v x86_64-w64-mingw32-gcc)
-    OUT=port/build/Tenkaichi3Decomp-switch-setup.exe
+    EXE=setup.exe
     CMAKE_SYS="-DCMAKE_SYSTEM_NAME=Windows -DCMAKE_C_COMPILER=$CC -DCMAKE_CXX_COMPILER=$CXX -DCMAKE_RC_COMPILER=x86_64-w64-mingw32-windres"
-else
-    T=linux
+    LINK="-static -static-libgcc -static-libstdc++ -mwindows" ;;
+linux)
     CXX=g++; CC=gcc
-    OUT=port/build/Tenkaichi3Decomp-switch-setup
-    CMAKE_SYS="-DSDL_UNIX_CONSOLE_BUILD=ON -DSDL_X11=OFF -DSDL_WAYLAND=OFF"  # (for tests: --install, no window needed)
-fi
-ZIP=${1:-port/build/Tenkaichi3Decomp-switch.zip}
+    CMAKE_SYS=""
+    LINK="-static-libgcc -static-libstdc++ -lpthread -ldl" ;;
+mac)
+    CXX=clang++; CC=clang
+    FLAGS="-arch arm64 -arch x86_64 -mmacosx-version-min=11.0"
+    CMAKE_SYS="-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64 -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0"
+    LINK="" ;;
+test)
+    CXX=g++; CC=gcc
+    CMAKE_SYS="-DSDL_UNIX_CONSOLE_BUILD=ON -DSDL_X11=OFF -DSDL_WAYLAND=OFF"
+    LINK="-lpthread -ldl" ;;
+*)
+    echo "usage: $0 win|linux|mac|test"; exit 2 ;;
+esac
 W=port/build/switch-setup-$T
 S=$W/sdl
 mkdir -p $W
@@ -53,20 +69,9 @@ for f in $I/imgui.cpp $I/imgui_draw.cpp $I/imgui_tables.cpp $I/imgui_widgets.cpp
          $I/imgui_impl_opengl3.cpp port/switch/setup/setup.cpp port/switch/setup/work.cpp; do
     o=$W/$(basename "$f" .cpp).o
     if [ ! -f "$o" ] || [ "$f" -nt "$o" ] || [ port/setup/native.cpp -nt "$o" ] || [ port/switch/setup/work.h -nt "$o" ]; then
-        $CXX -std=c++17 -O2 -w -I$I -I$S/include -c "$f" -o "$o"
+        $CXX -std=c++17 -O2 -w $FLAGS -I$I -I$S/include -c "$f" -o "$o"
     fi
 done
-if [ $T = win ]; then
-    $CXX -o $W/setup.exe $W/*.o -L$S/lib -lSDL3 $SDLLIBS -static -static-libgcc -static-libstdc++ -mwindows
-else
-    $CXX -o $W/setup $W/*.o -L$S/lib -lSDL3 $SDLLIBS -lpthread -ldl
-fi
-
-# the release's files at its end
-if [ ! -f "$ZIP" ]; then
-    echo "no $ZIP: build the zip first (BT3_CC=nx64 port/tools/package.py)"; exit 1
-fi
-cp $W/setup$( [ $T = win ] && echo .exe ) $OUT
-cat "$ZIP" >> $OUT
-python3 -c "import struct,sys,os; sys.stdout.buffer.write(b'BT3NXSD1' + struct.pack('<Q', os.path.getsize(sys.argv[1])))" "$ZIP" >> $OUT
-echo "built $OUT ($(du -h $OUT | cut -f1), with $(basename $ZIP))"
+$CXX $FLAGS -o $W/$EXE $W/*.o -L$S/lib -lSDL3 $SDLLIBS $LINK
+echo "built $W/$EXE"
+[ $T = test ] || python3 port/switch/setup/zip.py $T $W/$EXE

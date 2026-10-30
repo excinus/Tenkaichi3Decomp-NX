@@ -82,11 +82,14 @@ jobs:
       - name: Test kit
         run: sh port/switch/test_kit.sh
 
-      # the Windows setup (port/switch/setup), with this build's zip in it
-      - name: Windows setup
+      # the setups for Windows and Linux (port/switch/setup), each in its zip beside this build's Switch files
+      - name: Setups (Windows, Linux)
         run: |
-          apt-get install -y --no-install-recommends mingw-w64 cmake
+          apt-get install -y --no-install-recommends mingw-w64 cmake libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
+            libxfixes-dev libxi-dev libxss-dev libxtst-dev libxkbcommon-dev libwayland-dev wayland-protocols libdbus-1-dev \
+            libudev-dev libegl-dev libgl-dev libdecor-0-dev
           sh port/switch/setup/build.sh win
+          sh port/switch/setup/build.sh linux
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -104,16 +107,24 @@ jobs:
           retention-days: 30
       - uses: actions/upload-artifact@v4
         with:
-          name: Tenkaichi3Decomp-switch-setup
-          path: port/build/Tenkaichi3Decomp-switch-setup.exe
+          name: Tenkaichi3Decomp-switch-windows
+          path: port/build/Tenkaichi3Decomp-switch-windows.zip
           if-no-files-found: error
           retention-days: 14
       - uses: actions/upload-artifact@v4
         with:
-          name: Tenkaichi3Decomp-switch
-          path: port/build/Tenkaichi3Decomp-switch.zip
+          name: Tenkaichi3Decomp-switch-linux
+          path: port/build/Tenkaichi3Decomp-switch-linux.zip
           if-no-files-found: error
           retention-days: 14
+      - uses: actions/upload-artifact@v4
+        with:
+          name: switch-files
+          path: |
+            port/build/Tenkaichi3Decomp-switch.zip
+            port/build/nx/SDL3-*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
       - uses: actions/upload-artifact@v4
         with:
           name: bt3_nx
@@ -123,5 +134,25 @@ jobs:
             port/build/bt3_nx.mem
             port/build/bt3_nx.rel
             port/build/bt3_nx.map
+          if-no-files-found: error
+          retention-days: 14
+
+  # the macOS setup in its zip, on a Mac (port/switch/setup/build.sh mac), with the Switch files of `game`
+  mac:
+    needs: game
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: switch-files
+          path: port/build
+      - name: The macOS setup
+        run: sh port/switch/setup/build.sh mac
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Tenkaichi3Decomp-switch-macos
+          path: port/build/Tenkaichi3Decomp-switch-macos.zip
           if-no-files-found: error
           retention-days: 14

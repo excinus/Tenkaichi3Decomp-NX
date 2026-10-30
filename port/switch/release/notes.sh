@@ -18,7 +18,7 @@ if [ -n "$why" ] && [ -s "$why" ]; then
     sed 's/^/- /' "$why"
     echo
 fi
-echo "First install: Tenkaichi3Decomp-switch-setup.exe (Windows): it puts the game on your SD card, with the game data from your own disc image or from your PC version of Tenkaichi3Decomp. Without Windows: Tenkaichi3Decomp-switch.zip and INSTALL.txt in it. You need Atmosphere and sys-clk on the Switch. Already installed: the game updates itself (+ and - together, then Update now)."
+echo "First install: download the zip for your PC (windows, linux or macos), unpack it, and start the setup inside: it puts the game on your SD card, with the game data from your own disc image or from your PC version of Tenkaichi3Decomp. You need Atmosphere and sys-clk on the Switch. Already installed: the game updates itself (+ and - together, then Update now)."
 echo
 if [ -z "$prev" ]; then
     echo "The first release for the Switch."

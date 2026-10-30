@@ -9,18 +9,13 @@
 //                         build reads (port/src/plat_nxfs.c, "The packs");
 //   from the PC version   its gamedata copied to the card, each folder of 10,000 files or more written as one pack
 //                         instead (as port/switch/pack_gamedata.py does), checked against the folder.
-// And in both: the game and its launcher (atmosphere/... and switch/Tenkaichi3Decomp.nro), from the release's SD zip
-// carried at the end of this program (port/switch/setup/build.sh appends it, with a trailer that says where it is).
+// And in both: the game and its launcher (atmosphere/... and switch/Tenkaichi3Decomp.nro), from the release's zip,
+// unpacked: they are beside this program (port/switch/setup/zip.py puts them there).
 // Files already on the card and the same size are kept, so a second run continues where one stopped.
 //
 // It reports through native.cpp's event lines (@step, @note, @ok, @skip, @fail, @stopped, @done), read by the window.
 #include "../../setup/native.cpp"
 
-#define MINIZ_NO_ARCHIVE_WRITING_APIS
-#define MINIZ_NO_STDIO
-#define MINIZ_NO_TIME
-#include "../../third_party/miniz/miniz.h"
-#include "../../third_party/miniz/miniz.c"
 #include "work.h"
 
 #ifdef _WIN32
@@ -28,13 +23,9 @@ extern "C" {
 __declspec(dllimport) int __stdcall GetDiskFreeSpaceExW(const wchar_t *dir, unsigned long long *avail, unsigned long long *total,
                                                         unsigned long long *free);
 __declspec(dllimport) int __stdcall MultiByteToWideChar(unsigned page, unsigned long flags, const char *s, int n, wchar_t *out, int outLen);
-__declspec(dllimport) unsigned long __stdcall GetModuleFileNameW(void *module, wchar_t *out, unsigned long size);
-__declspec(dllimport) int __stdcall WideCharToMultiByte(unsigned page, unsigned long flags, const wchar_t *wide, int wideLen, char *out, int outLen,
-                                                        const char *def, int *usedDef);
 }
 #else
 #include <sys/statvfs.h>
-#include <unistd.h>
 #endif
 
 namespace {
@@ -89,117 +80,47 @@ std::string mb(Uint64 bytes) {
     return s;
 }
 
-// ---- the release carried at the end of this program ----
-// The last 16 bytes: "BT3NXSD1" and the zip's size (little-endian); the zip right before them.
-bool own_path(std::string &out) {
-#ifdef _WIN32
-    wchar_t w[1024];
-    unsigned long n = GetModuleFileNameW(NULL, w, 1024);
-    char u[4096];
-    if (n == 0 || n >= 1024 || WideCharToMultiByte(65001, 0, w, -1, u, sizeof(u), NULL, NULL) <= 0) {
-        return false;
-    }
-    out = u;
-    return true;
-#else
-    char u[4096];
-    ssize_t n = readlink("/proc/self/exe", u, sizeof(u) - 1);
-    if (n <= 0) {
-        return false;
-    }
-    u[n] = '\0';
-    out = u;
-    return true;
-#endif
-}
+// ---- the Switch's files: the release zip's atmosphere/ and switch/, unpacked beside this program ----
+struct Entry { std::string rel; Uint64 size; };
+void list_files(const std::string &root, const std::string &rel, std::vector<Entry> &out);
 
-bool payload(std::vector<Uint8> &zip) {
-    std::string self;
-    const char *env = getenv("BT3_NXSETUP_ZIP"); // (testing: the SD zip as a file instead)
-    if (env != NULL) {
-        size_t n = 0;
-        void *d = SDL_LoadFile(env, &n);
-        if (d == NULL) {
-            return false;
-        }
-        zip.assign((Uint8 *)d, (Uint8 *)d + n);
-        SDL_free(d);
-        return true;
-    }
-    if (!own_path(self)) {
-        return false;
-    }
-    SDL_IOStream *io = SDL_IOFromFile(self.c_str(), "rb");
-    Uint8 tail[16];
-    Sint64 size = io != NULL ? SDL_GetIOSize(io) : -1;
-    bool ok = size > 16 && SDL_SeekIO(io, size - 16, SDL_IO_SEEK_SET) >= 0 && SDL_ReadIO(io, tail, 16) == 16 && memcmp(tail, "BT3NXSD1", 8) == 0;
-    if (ok) {
-        Uint64 n = 0;
-        for (int i = 7; i >= 0; i--) {
-            n = n << 8 | tail[8 + i];
-        }
-        ok = n > 0 && (Sint64)n <= size - 16;
-        if (ok) {
-            zip.resize((size_t)n);
-            ok = SDL_SeekIO(io, size - 16 - (Sint64)n, SDL_IO_SEEK_SET) >= 0 && SDL_ReadIO(io, zip.data(), zip.size()) == zip.size();
-        }
-    }
-    if (io != NULL) {
-        SDL_CloseIO(io);
-    }
-    return ok;
+std::string files_dir() {
+    const char *env = getenv("BT3_NXSETUP_FILES"); // (testing: another folder)
+    const char *base = SDL_GetBasePath();
+    return slash(env != NULL ? env : base != NULL ? base : "./");
 }
 
 void step_switch(const std::string &sd) {
-    std::vector<Uint8> zip;
-    mz_zip_archive z;
-    int n, files = 0;
+    std::string from = files_dir();
+    std::vector<Entry> files;
+    Uint64 bytes = 0;
 
     step("Switch files");
-    if (!payload(zip)) {
-        throw Stop{"This setup does not carry the game's files (it is not a release's Tenkaichi3Decomp-switch-setup.exe).\n"
-                   "Download the setup again from the releases page."};
+    if (file_size(from + kGameDir + "Tenkaichi3Decomp") <= 0 || file_size(from + "switch/Tenkaichi3Decomp.nro") <= 0) {
+        throw Stop{"The game's files are not next to this setup.\nUnpack the whole Tenkaichi3Decomp-switch zip into a folder first, "
+                   "then start the setup from that folder."};
     }
-    memset(&z, 0, sizeof(z));
-    if (!mz_zip_reader_init_mem(&z, zip.data(), zip.size(), 0)) {
-        throw Stop{"The game's files inside this setup are damaged. Download the setup again."};
-    }
-    n = (int)mz_zip_reader_get_num_files(&z);
-    try {
-        for (int i = 0; i < n; i++) {
-            mz_zip_archive_file_stat st;
-            if (!mz_zip_reader_file_stat(&z, (mz_uint)i, &st) || st.m_is_directory) {
-                continue;
-            }
-            std::string name = st.m_filename;
-            if ((name.rfind("atmosphere/", 0) != 0 && name.rfind("switch/", 0) != 0) || name.find("..") != std::string::npos) {
-                continue; // (the zip's notes and tools for installing by hand)
-            }
-            size_t size = 0;
-            void *data = mz_zip_reader_extract_to_heap(&z, (mz_uint)i, &size, 0);
-            if (data == NULL) {
-                throw Stop{"The game's files inside this setup are damaged. Download the setup again."};
-            }
-            std::string path = sd + name;
-            try {
-                make_dir(path.substr(0, path.rfind('/')));
-                put_file(path, data, size);
-            } catch (...) {
-                mz_free(data);
-                throw;
-            }
-            mz_free(data);
-            files++;
-            check_cancel();
+    list_files(from, kGameDir, files);
+    list_files(from, "switch/", files);
+    for (auto &f : files) {
+        std::string to = sd + f.rel;
+        size_t size = 0;
+        void *d = SDL_LoadFile((from + f.rel).c_str(), &size);
+        if (d == NULL) {
+            throw Stop{"Could not read " + from + f.rel + "."};
         }
-    } catch (...) {
-        mz_zip_reader_end(&z);
-        throw;
+        try {
+            make_dir(to.substr(0, to.rfind('/')));
+            put_file(to, d, size);
+        } catch (...) {
+            SDL_free(d);
+            throw;
+        }
+        SDL_free(d);
+        bytes += size;
+        check_cancel();
     }
-    mz_zip_reader_end(&z);
-    char line[96];
-    snprintf(line, sizeof(line), "@ok the game and its launcher, %d files", files);
-    say(line);
+    say("@ok the game and its launcher (" + std::to_string(files.size()) + " files, " + mb(bytes) + ")");
 }
 
 // ---- free space on the card ----
@@ -228,6 +149,8 @@ void need_space(const std::string &sd, Uint64 bytes) {
 struct Progress {
     Uint64 total = 0, done = 0;
     int files = 0, last = -1;
+    int written = 0, kept = 0;          // files copied now, files on the card already
+    std::vector<std::string> packs;     // "pzs3us2.afs (65,048 voice files)"
     void add(Uint64 n) {
         done += n;
         int percent = total ? (int)(done * 100 / total) : 0;
@@ -241,15 +164,44 @@ struct Progress {
     }
 };
 
+// what the step did, in a line: "2.9 GB on the SD card: 3,636 files copied, and the 65,048 voice files as one,
+// pzs3us2.afs" (or "already there")
+std::string thousands(Uint64 n) {
+    std::string s = std::to_string(n);
+    for (int i = (int)s.size() - 3; i > 0; i -= 3) {
+        s.insert((size_t)i, ",");
+    }
+    return s;
+}
+
+// "the 65,048 voice files as one file, pzs3us2.afs"
+std::string pack_label(Uint64 n, const std::string &stem) {
+    return "the " + thousands(n) + (stem == "pzs3us2" ? " voice files" : " files of " + stem) + " as one file, " + stem + ".afs";
+}
+
+std::string summary(const Progress &p) {
+    std::string line = mb(p.total) + " on the SD card: ";
+    if (p.written == 0) {
+        line += "all of it there already";
+    } else {
+        line += thousands((Uint64)p.written) + " files copied" + (p.kept ? ", " + thousands((Uint64)p.kept) + " there already" : "");
+    }
+    for (auto &k : p.packs) {
+        line += "; " + k;
+    }
+    return line;
+}
+
 // copies `size` bytes of the image at `offset` to `path` unless a file of that size is there
-void iso_file(Iso &iso, Uint64 offset, Uint64 size, const std::string &path, std::vector<Uint8> &buf) {
+bool iso_file(Iso &iso, Uint64 offset, Uint64 size, const std::string &path, std::vector<Uint8> &buf) {
     if (file_size(path) == (Sint64)size) {
-        return;
+        return false;
     }
     copy_out(iso, offset, size, path + ".part", buf);
     if (!SDL_RenamePath((path + ".part").c_str(), path.c_str())) {
         throw Stop{"Could not write " + path + ". Is the SD card full or write-protected?"};
     }
+    return true;
 }
 
 // ---- way 1: from the disc image ----
@@ -274,7 +226,7 @@ void step_data_iso(Iso &iso, const std::string &game) {
         if (!afs) {
             std::string out = data + "disc/" + u;
             make_dir(out.substr(0, out.rfind('/')));
-            iso_file(iso, f->offset, f->size, out, buf);
+            (iso_file(iso, f->offset, f->size, out, buf) ? p.written : p.kept)++;
             p.files++;
             p.add(f->size);
             continue;
@@ -288,9 +240,10 @@ void step_data_iso(Iso &iso, const std::string &game) {
             throw Stop{"An archive on the disc (" + f->path + ") is damaged."};
         }
         if (count >= kPackFrom) { // the whole archive: the pack
-            say("@note " + stem + ": " + std::to_string(count) + " files as one pack");
+            say("@note " + stem + ": " + std::to_string(count) + " files as one, " + stem + ".afs");
             make_dir(data);
-            iso_file(iso, f->offset, f->size, data + stem + ".afs", buf);
+            (iso_file(iso, f->offset, f->size, data + stem + ".afs", buf) ? p.written : p.kept)++;
+            p.packs.push_back(pack_label(count, stem));
             p.files++;
             p.add(f->size);
             continue;
@@ -306,7 +259,7 @@ void step_data_iso(Iso &iso, const std::string &game) {
             if ((Uint64)table[i * 2] + table[i * 2 + 1] > f->size) {
                 throw Stop{"An archive on the disc (" + f->path + ") is damaged."};
             }
-            iso_file(iso, f->offset + table[i * 2], table[i * 2 + 1], dir + name, buf);
+            (iso_file(iso, f->offset + table[i * 2], table[i * 2 + 1], dir + name, buf) ? p.written : p.kept)++;
             p.files++;
             inArchive += table[i * 2 + 1];
             p.add(table[i * 2 + 1]);
@@ -314,11 +267,10 @@ void step_data_iso(Iso &iso, const std::string &game) {
         p.add(f->size > inArchive ? f->size - inArchive : 0);
     }
     put_file(data + ".installed", "", 0);
-    say("@ok " + std::to_string(p.files) + " files, " + mb(p.total));
+    say("@ok " + summary(p));
 }
 
 // ---- way 2: from the PC version ----
-struct Entry { std::string rel; Uint64 size; };
 
 // the names in one folder (not below it)
 SDL_EnumerationResult SDLCALL name_of(void *user, const char *dir, const char *name) {
@@ -390,6 +342,7 @@ void write_pack(const std::string &dir, const std::vector<Sint64> &sizes, const 
             p.files += s >= 0;
             p.add(s > 0 ? (Uint64)s : 0);
         }
+        p.kept++;
         return;
     }
     std::string part = dest + ".part";
@@ -480,6 +433,7 @@ void write_pack(const std::string &dir, const std::vector<Sint64> &sizes, const 
         SDL_RemovePath(part.c_str());
         throw Stop{"Could not write " + dest + "."};
     }
+    p.written++;
 }
 
 std::string pc_gamedata(const std::string &pc) {
@@ -532,7 +486,10 @@ void step_data_pc(const std::string &pc, const std::string &game) {
     need_space(game, p.total);
     for (auto &f : copy) {
         std::string from = src + f.rel, to = dst + f.rel;
-        if (file_size(to) != (Sint64)f.size) {
+        if (file_size(to) == (Sint64)f.size) {
+            p.kept++;
+        } else {
+            p.written++;
             size_t size = 0;
             void *d = SDL_LoadFile(from.c_str(), &size);
             if (d == NULL) {
@@ -553,11 +510,16 @@ void step_data_pc(const std::string &pc, const std::string &game) {
     for (auto &k : packs) {
         std::vector<Sint64> sizes;
         pack_folder(src + k + "/", sizes);
-        say("@note " + k + ": " + std::to_string(sizes.size()) + " files into one pack");
+        Uint64 n = 0;
+        for (Sint64 sz : sizes) {
+            n += sz >= 0;
+        }
+        say("@note " + k + ": " + thousands(n) + " files into one, " + k + ".afs");
         make_dir(dst);
         write_pack(src + k + "/", sizes, dst + k + ".afs", p);
+        p.packs.push_back(pack_label(n, k));
     }
-    say("@ok " + std::to_string(p.files) + " files, " + mb(p.total));
+    say("@ok " + summary(p));
 }
 
 void work_nx(NxJob job) {
@@ -615,8 +577,8 @@ void NxSetup_Start(const NxJob &job) {
 }
 
 bool NxSetup_HasFiles(void) {
-    std::vector<Uint8> zip;
-    return payload(zip);
+    std::string from = files_dir();
+    return file_size(from + kGameDir + "Tenkaichi3Decomp") > 0 && file_size(from + "switch/Tenkaichi3Decomp.nro") > 0;
 }
 
 bool NxSetup_PcValid(const std::string &pc) {
@@ -634,7 +596,7 @@ std::string NxSetup_CardNote(const std::string &sd, bool &warn) {
     std::string space = have ? mb(have) + " free" : "";
     if (!is_dir(root + "atmosphere")) {
         warn = true;
-        return "No atmosphere folder here: is this the Switch's SD card, with Atmosphere on it? Choose the card itself (its drive, such as E:\\)." +
+        return "No atmosphere folder here: is this the Switch's SD card, with Atmosphere on it? Choose the card itself (on Windows its drive, such as E:\\)." +
                (space.empty() ? "" : " (" + space + ")");
     }
     return "Atmosphere found" + (space.empty() ? std::string(".") : ", " + space + ".");

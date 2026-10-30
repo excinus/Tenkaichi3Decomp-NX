@@ -47,8 +47,8 @@ You need:
 
 Steps:
 
-1. Download **`Tenkaichi3Decomp-switch-setup.exe`** from the
-   [latest release](https://github.com/excinus/Tenkaichi3Decomp-NX/releases/latest) and start it (anywhere on your PC).
+1. Download the zip for your PC from the [latest release](https://github.com/excinus/Tenkaichi3Decomp-NX/releases/latest)
+   (**windows**, **linux** or **macos**), unpack it, and start **Tenkaichi3Decomp-switch-setup** inside.
 2. Choose your disc image or your PC version's folder, then your SD card, and press **Install**. It puts the game and
    its data on the card (a few minutes).
 3. On the Switch, open the homebrew menu **through a game** (hold R while starting any game) and start
@@ -56,7 +56,7 @@ Steps:
 4. *Optional, recommended:* put the game on the HOME menu with a forwarder made by
    [sphaira](https://github.com/NaGaa95/sphaira), so it starts like any other game.
 
-Without Windows: `Tenkaichi3Decomp-switch.zip` and `INSTALL.txt` in it.
+On macOS the first start may be refused (an unsigned program): right-click the setup, **Open**, then **Open** again.
 
 ## Troubleshooting
 
@@ -68,8 +68,8 @@ Without Windows: `Tenkaichi3Decomp-switch.zip` and `INSTALL.txt` in it.
 ## Building
 
 See [docs/port/switch_plan.md](docs/port/switch_plan.md). In devkitPro's container with LLVM 22:
-`sh port/switch/release/build.sh .` builds both zips, then `sh port/switch/setup/build.sh win` the Windows setup
-(with mingw-w64); no game files are needed. The rest of the repository is
+`sh port/switch/release/build.sh .` builds the game, then `sh port/switch/setup/build.sh win` (or `linux`, or `mac` on a
+Mac) the release's zip with the setup; no game files are needed. The rest of the repository is
 Tenkaichi3Decomp, followed release by release; for the PC version, use
 [upstream](https://github.com/z3xox/Tenkaichi3Decomp).
 

@@ -1,12 +1,12 @@
-// The Switch setup's window (docs/port/switch_plan.md, "The setup"): Tenkaichi3Decomp-switch-setup.exe, one program to
-// put anywhere. The player chooses where the game data comes from (the disc image, or the PC version installed
+// The Switch setup's window (docs/port/switch_plan.md, "The setup"): Tenkaichi3Decomp-switch-setup, in each release's
+// zip (Windows, Linux, macOS) beside the Switch's files. The player chooses where the game data comes from (the disc image, or the PC version installed
 // before) and the SD card, presses Install, and watches the steps (work.cpp). The look and the drawing are the PC
 // setup's (port/setup/setup.cpp: SDL3 and Dear ImGui, SDL's GPU layer or OpenGL).
 //
-//   build:  port/switch/setup/build.sh win <SD zip>  ->  port/build/Tenkaichi3Decomp-switch-setup.exe
+//   build:  port/switch/setup/build.sh win|linux|mac  ->  port/build/Tenkaichi3Decomp-switch-<system>.zip
 //   test:   Tenkaichi3Decomp-switch-setup --install (--iso <file> [--eu <file>] | --pc <folder>) --sd <folder>: the
-//           same work without a window, printing the event lines; BT3_NXSETUP_ZIP=<SD zip> stands for the files
-//           carried in the program, BT3_NXSETUP_NOCHECK=1 skips the disc's checksums (a made-up image)
+//           same work without a window, printing the event lines; BT3_NXSETUP_FILES=<folder> stands for the setup's
+//           own folder (the Switch's files), BT3_NXSETUP_NOCHECK=1 skips the disc's checksums (a made-up image)
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -273,7 +273,7 @@ static void page_pick() {
 
     heading(TITLE, "This puts the game on your Switch's SD card, with the game's data from your own PlayStation 2 disc.");
     if (!sHasFiles) {
-        note(kRed, "This program does not carry the game's files: download Tenkaichi3Decomp-switch-setup.exe again from the releases page.");
+        note(kRed, "The game's files are not next to this program. Unpack the whole Tenkaichi3Decomp-switch zip into a folder, then start the setup from there.");
         ok = false;
     }
     ImGui::TextUnformatted("The game's data comes from");
@@ -305,7 +305,14 @@ static void page_pick() {
         }
     }
     ImGui::Dummy(ImVec2(0.0f, 4.0f));
-    path_field("SD card", "##sd", "the SD card's drive, such as E:\\", sSd, sizeof(sSd), 3, true);
+#if defined(_WIN32)
+    const char *sdHint = "the SD card's drive, such as E:\\";
+#elif defined(__APPLE__)
+    const char *sdHint = "the SD card, such as /Volumes/SWITCH SD";
+#else
+    const char *sdHint = "the SD card, such as /media/you/SWITCH SD";
+#endif
+    path_field("SD card", "##sd", sdHint, sSd, sizeof(sSd), 3, true);
     {
         bool warn = false;
         std::string text = NxSetup_CardNote(sSd, warn);
@@ -517,7 +524,8 @@ int main(int argc, char **argv) {
     static const char *fonts[] = {
         "C:\\Windows\\Fonts\\segoeui.ttf", "/usr/share/fonts/TTF/DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/noto/NotoSans-Regular.ttf", "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
-        "/usr/share/fonts/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/liberation/LiberationSans-Regular.ttf", "/System/Library/Fonts/Supplemental/Arial.ttf",
+        "/System/Library/Fonts/Geneva.ttf",
     };
     ImGui_ImplSDLGPU3_InitInfo info;
 

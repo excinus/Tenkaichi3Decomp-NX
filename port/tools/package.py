@@ -454,25 +454,6 @@ licences: licenses/. Its source, this release's tag included: https://github.com
 Switch's), from https://github.com/z3xox/Tenkaichi3Decomp (the port's).
 """
 
-NX_INSTALL = """Tenkaichi3Decomp for the Nintendo Switch - installing by hand
-
-On Windows, Tenkaichi3Decomp-switch-setup.exe (on the same releases page) does all of this for you, from your disc
-image or from your PC version. By hand (Linux, macOS):
-
-You need:
-  - a Switch with Atmosphere and the homebrew menu, and sys-clk (it comes with the HATS pack). The game sets the
-    clocks it needs by itself while it runs; without sys-clk fights run at 16 to 20 fps;
-  - the PC version of Tenkaichi3Decomp, installed from your own disc: its game data is copied from it.
-
-1. Copy the atmosphere and switch folders of this zip to the root of the SD card.
-2. Copy the gamedata folder of your PC installation into atmosphere/contents/0100B73DEC000000/ on the card.
-3. Pack its folder of 65,000 voice files into one file (the Switch is slow to open files in so large a folder):
-       python3 pack_gamedata.py <card>/atmosphere/contents/0100B73DEC000000/gamedata --delete
-4. On the Switch, open the homebrew menu THROUGH A GAME (hold R while starting any game) and start Tenkaichi3Decomp.
-
-Updates come by themselves: + and - together in the game, then Update now. Saves are in saves/ in
-atmosphere/contents/0100B73DEC000000/, as on the PC.
-"""
 
 NX_LIBRARIES = """The Switch program (Tenkaichi3Decomp) is linked with these libraries besides the port's own (see the
 other files here for those):
@@ -492,10 +473,9 @@ def main_nx():
     program (an ELF the launcher loads) with its lists (.dat, .mem, .rel), the screen reader's lines, translations,
     fonts, the online screens' pictures, the notes of textures/, songs/, stages/, README.txt, licenses/. It goes to
     atmosphere/contents/0100B73DEC000000/ on the SD card. With the launcher built (port/switch/launcher/build.sh, before
-    this), its copy launcher.nro is in it (the launcher takes it from there). The release's one zip,
-    Tenkaichi3Decomp-switch.zip, is the SD card's layout: that folder, switch/Tenkaichi3Decomp.nro, pack_gamedata.py and
-    INSTALL.txt (a first install by hand; what the Switch setup carries, port/switch/setup; and what the game's
-    automatic update installs, its game folder only). BT3_NX_LAUNCHER=1: an error without the launcher (a release)."""
+    this), its copy launcher.nro is in it (the launcher takes it from there). Then Tenkaichi3Decomp-switch.zip: that folder
+    and switch/Tenkaichi3Decomp.nro as the SD card has them, from which port/switch/setup/zip.py makes the release's
+    zip for each PC system, beside its setup. BT3_NX_LAUNCHER=1: an error without the launcher (a release)."""
     import toolchain
     exe = toolchain.EXE
     for need in (exe, pathlib.Path(str(exe) + ".rel")):
@@ -533,8 +513,8 @@ def main_nx():
     for kind, note in (("stages", STAGES_NOTE), ("songs", SONGS_NOTE)):
         (NX_OUT / kind).mkdir()
         (NX_OUT / kind / "README.txt").write_text(note)
-    # the release's one zip: the SD card's layout (a first install by hand, what the setup carries, and what the
-    # game's automatic update takes: only its atmosphere/contents/<title>/ part, gs/net_update.c)
+    # the Switch's files as the SD card has them, which port/switch/setup/zip.py puts beside each system's setup in
+    # the release's zips (Tenkaichi3Decomp-switch-windows.zip, -linux.zip, -macos.zip)
     if NX_ZIP.exists():
         NX_ZIP.unlink()
     with zipfile.ZipFile(NX_ZIP, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
@@ -545,9 +525,6 @@ def main_nx():
         if launcher.exists():
             z.writestr(zipfile.ZipInfo.from_file(launcher, "switch/Tenkaichi3Decomp.nro"), launcher.read_bytes(),
                        compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
-        pack = ROOT / "port/switch/pack_gamedata.py"
-        z.writestr(zipfile.ZipInfo.from_file(pack, "pack_gamedata.py"), pack.read_bytes(), compress_type=zipfile.ZIP_DEFLATED)
-        z.writestr("INSTALL.txt", NX_INSTALL.replace("\n", "\r\n"), compress_type=zipfile.ZIP_DEFLATED)
     print(f"{NX_ZIP.relative_to(ROOT)}: {NX_ZIP.stat().st_size / 1e6:.1f} MB (the SD card's layout)")
 
 if os.environ.get("BT3_CC") == "win64":

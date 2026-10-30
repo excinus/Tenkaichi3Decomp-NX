@@ -38,9 +38,9 @@ The Switch version works like the PC one, automatic update included, and the fol
 PC release folder. It is this fork's own release (excinus/Tenkaichi3Decomp-NX), not the original repository's: no
 Switch mode in the PC setup, no NSP (see "Releases (phase 5)").
 
-1. **The release** (this fork's GitHub releases): `Tenkaichi3Decomp-switch-setup.exe`, the Windows setup ("The
-   setup", below), and `Tenkaichi3Decomp-switch.zip` with its `.sig`: the SD card's layout, for a first install by
-   hand (with `INSTALL.txt`) and for the automatic update (which takes its game folder only):
+1. **The release** (this fork's GitHub releases): one zip per PC system, `Tenkaichi3Decomp-switch-windows.zip`,
+   `-linux.zip` and `-macos.zip`, each the setup for it ("The setup", below) and a README beside the Switch's files
+   as the SD card has them; the Windows one has a `.sig`, for the automatic update (which takes its game folder):
 
    ```
    <SD>/atmosphere/contents/0100B73DEC000000/      the game's folder: the PC release folder, for the Switch
@@ -61,7 +61,7 @@ Switch mode in the PC setup, no NSP (see "Releases (phase 5)").
    from the folder. F1 is + and - together (the PC's START + SELECT). sys-clk is required: the game sets the clocks
    it needs itself (phase 4).
 4. **Updates**: the game asks this fork's GitHub releases for the newest one as on PC; the asset is
-   `Tenkaichi3Decomp-switch.zip` with its `.sig`. The same rules as on PC: the signature is checked, the player's
+   `Tenkaichi3Decomp-switch-windows.zip` with its `.sig` (only its game folder is installed). The same rules as on PC: the signature is checked, the player's
    files (`saves/`, `gamedata/`, `mods/`, settings, packs, songs, stages, the player's font lines) are never
    written, and a failed install puts everything back. Restart now installs it and ends the game into the launcher,
    which says it is updated: the player starts it again (a second load in the same process is not safe, "The
@@ -266,13 +266,14 @@ or a mode that skips drawing frames.
 
 ## The setup
 
-`Tenkaichi3Decomp-switch-setup.exe` (`port/switch/setup`): one Windows program, put anywhere, that carries the
-release's SD zip at its end (`build.sh` appends it with a trailer: `BT3NXSD1` and its size). Its window is the PC
-setup's (`port/setup/setup.cpp`: SDL3, linked in statically here, and Dear ImGui), in the Switch's red. The player
+`Tenkaichi3Decomp-switch-setup` (`port/switch/setup`), for Windows, Linux and macOS (`build.sh win|linux|mac`; SDL3
+built and linked in statically; the Mac's holds arm64 and x86_64), in each release zip (`zip.py`) beside the
+Switch's files, which it copies from its own folder. Its window is the PC setup's (`port/setup/setup.cpp`: SDL3, linked in statically here, and Dear ImGui), in the Switch's red. The player
 chooses where the game data comes from and the SD card, and presses Install (`work.cpp`, on a thread, reporting in
 the PC setup's event lines):
 
-1. **Switch files**: the zip's `atmosphere/` and `switch/` onto the card (each file written as `.part`, then renamed).
+1. **Switch files**: `atmosphere/` and `switch/` from beside the setup onto the card (each file written as `.part`,
+   then renamed). A setup started without them (from inside the zip, say) says to unpack the whole zip first.
 2. **Disc image** (the USA image, as the PC setup checks it: `port/setup/native.cpp` is compiled into `work.cpp`, its
    ISO reader, checksums and European languages used as they are) or **PC installation** (its `gamedata` found).
 3. **Game data**: from the image, the loose files to `gamedata/disc/`, the small archives split as the PC's gamedata
@@ -306,7 +307,8 @@ port.
   must never change: games built with one key cannot check another's signatures (they would only say that a newer
   release exists).
 - **The build** (`switch-build.yml`, `port/switch/release/build.sh`): SDL3, the game, the launcher (its version in
-  the homebrew menu is the release's), `package.py` (both zips), the signature.
+  the homebrew menu is the release's), `package.py`; then the setups and their zips (Windows and Linux in the same
+  container, macOS on a Mac: the job `mac`), and the Windows zip's signature.
 - **A release by hand** (`switch-release.yml`, Actions > switch-release > Run workflow): the default branch (or the one chosen),
   the next number unless one is typed, notes typed in, optionally a pre-release. The notes
   (`port/switch/release/notes.sh`) say which version of the original it is, how to install, and the fork's own
