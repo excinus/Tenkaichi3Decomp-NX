@@ -41,6 +41,12 @@ s32 Option_Init(s32 section) {
     memset(gOption, 0, sizeof(Option));
     gOption->pack = (u32 *)MPACK_AT(gMenuArc10, section);
     gOption->res = Sprite_Unpack(gOption->pack, NULL, NULL);
+#if defined(PORT) && defined(__SWITCH__)
+    { /* the controller page's picture: a pair of Joy-Con, not a DualShock 2 (port/src/plat_nxart.c) */
+        extern void Port_NxOptionArt(void *res);
+        Port_NxOptionArt(gOption->res);
+    }
+#endif
     /*
      * The rest of the function sits in a block that the compiler sees as a loop (`do { } while (0)`, most likely
      * from a macro), and the counter of the loop at the end is cleared here, not in its `for`: the original

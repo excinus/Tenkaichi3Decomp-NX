@@ -758,3 +758,19 @@ Settings on the Switch (2026-10-30, the player's requests):
   (headless.c `gPortInMenus`) a controller's A is Cross, B Triangle and X Circle (gs_input.c, menu_ab), and the
   settings windows and the quit question swap choosing and going back the same way. Fights, the pause menu
   included, are left as they are.
+
+The game's own Options > Controller page and local duels (2026-10-30, the player's requests):
+- the page's picture of a DualShock 2 is a pair of Joy-Con (`port/switch/art/joycons.svg`, the player's drawing):
+  `port/switch/art/joycon_art.py` renders it (cairosvg) into the page's 128 x 128 texture of 256 colours, 90 texels
+  high from texel 12 and centred across (measured on a console's screenshot: below the title, clear of the guide's
+  head), as `port/src/nx_joycon_art.h`; `port/src/plat_nxart.c` writes it over section 21's texture 0 of the options
+  screen's pack when Option_Init has unpacked it (src/menu/menu_x_c.c), each texel at the byte the GS reads it from
+  (the PS Vita port changes the same picture this way: its port/vita/vita_optart.c and tools/bt3tex.py);
+- two players on one console: the duel menu's "1P vs 2P" shows the console's Controllers screen for two players
+  first (`port/src/plat_nxpad.c`, hidLaShowControllerSupport; left without two controllers, the choice is refused
+  with the game's own sound), and Controls has "Controllers: 1 player" and "2 players". SDL's driver reads player n
+  from the n-th controller the screen gave, and takes a Joy-Con alone held sideways (hold type horizontal): its four
+  buttons by where they are when it lies sideways, the stick turned with it, SL / SR as L / R, its shoulder button
+  and trigger as ZL / ZR, its - or + as +, its own rumble. (Whether the system already turns a sideways Joy-Con is
+  not known: libnx reads hid's states as they are; a left Joy-Con alone giving A, B, X or Y is taken to mean it does,
+  and the log says so.)

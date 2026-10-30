@@ -6,13 +6,21 @@
    Up to MAX_PADS players through libnx's pad API: player 1 is the first controller or the console in the hand
    (handheld), the others the next controllers (a Pro Controller, a pair of Joy-Con). Each is a gamepad for SDL, its
    buttons by position: the bottom face button (B) is SDL's south, the right one (A) east, as SDL names them on
-   every controller; + is start, - is back. ZL and ZR are the triggers (digital). Rumble through hid's vibration. */
+   every controller; + is start, - is back. ZL and ZR are the triggers (digital). Rumble through hid's vibration.
+
+   A single Joy-Con held sideways (two players on one pair, after the console's Controllers screen: the game's
+   port/src/plat_nxpad.c) is turned here into the same pad: libnx reports its buttons by their names and its stick as
+   held upright, so the four buttons under the thumb are read by where they are when it lies sideways (the bottom one
+   is B, the right one A...), the stick turned with it, SL and SR are L and R, the shoulder button and its trigger are
+   ZL and ZR, and its one of - and + is +. Should the system turn it already (a left one giving A, B, X or Y), what it
+   gives is taken as it is. */
 #include "SDL_internal.h"
 
 #ifdef SDL_JOYSTICK_SWITCH
 
 #include "../SDL_sysjoystick.h"
 
+#include <stdio.h> /* (the game's log: stderr) */
 #include <switch.h>
 
 #define MAX_PADS 4
@@ -27,6 +35,18 @@ typedef struct
 } Slot;
 
 static Slot sSlot[MAX_PADS];
+static int sSystemTurns; /* a left Joy-Con alone gave A, B, X or Y: the system reports sideways Joy-Con turned itself */
+
+/* One Joy-Con alone (left or right), not a pair, a Pro Controller or the console in the hand: 1 left, 2 right, 0 not. */
+static int single_of(u32 style)
+{
+    if (style & (HidNpadStyleTag_NpadFullKey | HidNpadStyleTag_NpadHandheld | HidNpadStyleTag_NpadJoyDual)) {
+        return 0;
+    }
+    return (style & HidNpadStyleTag_NpadJoyLeft) ? 1 : (style & HidNpadStyleTag_NpadJoyRight) ? 2 : 0;
+}
+
+#define MOVE(from, to) ((raw >> (from)) & 1 ? 1ull << (to) : 0)
 
 static void slot_init(int i)
 {
@@ -71,6 +91,7 @@ static bool SWITCH_JoystickInit(void)
     int i;
 
     padConfigureInput(MAX_PADS, HidNpadStyleSet_NpadStandard);
+    hidSetNpadJoyHoldType(HidNpadJoyHoldType_Horizontal); /* (a Joy-Con alone is held sideways; a pair is not affected) */
     for (i = 0; i < MAX_PADS; i++) {
         slot_init(i);
     }
@@ -103,6 +124,12 @@ static const char *SWITCH_JoystickGetDeviceName(int device_index)
     }
     if (style & HidNpadStyleTag_NpadJoyDual) {
         return "Nintendo Switch Joy-Con (L/R)";
+    }
+    if (single_of(style) == 1) {
+        return "Nintendo Switch Joy-Con (L), sideways";
+    }
+    if (single_of(style) == 2) {
+        return "Nintendo Switch Joy-Con (R), sideways";
     }
     if (style & HidNpadStyleTag_NpadFullKey) {
         return "Nintendo Switch Pro Controller";
@@ -166,21 +193,24 @@ static bool SWITCH_JoystickRumble(SDL_Joystick *joystick, Uint16 low_frequency_r
     HidVibrationValue v[2];
     HidNpadIdType id = padIsHandheld(&s->pad) ? HidNpadIdType_Handheld : (HidNpadIdType)(HidNpadIdType_No1 + slot_of(joystick));
     u32 style = padGetStyleSet(&s->pad);
+    int single = single_of(style), devices = single ? 1 : 2;
     HidNpadStyleTag tag = (style & HidNpadStyleTag_NpadHandheld) ? HidNpadStyleTag_NpadHandheld :
-                          (style & HidNpadStyleTag_NpadFullKey) ? HidNpadStyleTag_NpadFullKey : HidNpadStyleTag_NpadJoyDual;
+                          (style & HidNpadStyleTag_NpadFullKey) ? HidNpadStyleTag_NpadFullKey :
+                          single == 1 ? HidNpadStyleTag_NpadJoyLeft : single == 2 ? HidNpadStyleTag_NpadJoyRight : HidNpadStyleTag_NpadJoyDual;
 
-    if (!s->vibrationReady) {
-        if (R_FAILED(hidInitializeVibrationDevices(s->vibration, 2, id, tag))) {
+    if (s->vibrationReady != (int)tag) { /* (made again when the controller there changes: a pair split in two) */
+        if (R_FAILED(hidInitializeVibrationDevices(s->vibration, devices, id, tag))) {
+            s->vibrationReady = 0;
             return SDL_SetError("No rumble on this controller");
         }
-        s->vibrationReady = 1;
+        s->vibrationReady = (int)tag;
     }
     v[0].amp_low = (float)low_frequency_rumble / 65535.0f;
     v[0].freq_low = 160.0f;
     v[0].amp_high = (float)high_frequency_rumble / 65535.0f;
     v[0].freq_high = 320.0f;
     v[1] = v[0];
-    return R_SUCCEEDED(hidSendVibrationValues(s->vibration, v, 2));
+    return R_SUCCEEDED(hidSendVibrationValues(s->vibration, v, devices));
 }
 
 static bool SWITCH_JoystickRumbleTriggers(SDL_Joystick *joystick, Uint16 left_rumble, Uint16 right_rumble)
@@ -216,9 +246,37 @@ static void SWITCH_JoystickUpdate(SDL_Joystick *joystick)
 {
     Slot *s = &sSlot[slot_of(joystick)];
     Uint64 now = SDL_GetTicksNS();
-    u64 buttons = padGetButtons(&s->pad);
+    u64 raw = padGetButtons(&s->pad), buttons = raw;
     HidAnalogStickState l = padGetStickPos(&s->pad, 0), r = padGetStickPos(&s->pad, 1);
+    int single = single_of(padGetStyleSet(&s->pad));
     Uint8 b;
+
+    if (single == 1 && (raw & 15) != 0 && !sSystemTurns) {
+        sSystemTurns = 1;
+        fprintf(stderr, "bt3: pad: a left Joy-Con alone gave A, B, X or Y: the system turns sideways Joy-Con itself\n");
+    }
+    if (single == 1 && !sSystemTurns) {
+        /* the left one sideways (its rail up, the stick on the left): the buttons turned a quarter to the left */
+        buttons = MOVE(15, 0) | MOVE(12, 1) | MOVE(14, 2) | MOVE(13, 3) | MOVE(4, 4) | MOVE(24, 6) | MOVE(25, 7) |
+                  MOVE(6, 8) | MOVE(8, 9) | MOVE(11, 10);
+        r.x = -l.y; /* (r: the turned stick, for the moment) */
+        r.y = l.x;
+        l = r;
+        r.x = r.y = 0;
+    } else if (single == 2 && !sSystemTurns) {
+        /* the right one sideways (its rail up, the stick on the left): the buttons turned a quarter to the right */
+        buttons = MOVE(2, 0) | MOVE(0, 1) | MOVE(3, 2) | MOVE(1, 3) | MOVE(5, 4) | MOVE(26, 6) | MOVE(27, 7) |
+                  MOVE(7, 8) | MOVE(9, 9) | MOVE(10, 10);
+        l.x = r.y;
+        l.y = -r.x;
+        r.x = r.y = 0;
+    } else if (single == 1) {
+        buttons |= MOVE(24, 6) | MOVE(25, 7) | MOVE(11, 10); /* (turned by the system: SL / SR still to be L / R) */
+    } else if (single == 2) {
+        buttons |= MOVE(26, 6) | MOVE(27, 7);
+        l = r; /* (its stick is the right one's) */
+        r.x = r.y = 0;
+    }
 
     for (b = 0; b < NUM_BUTTONS; b++) {
         SDL_SendJoystickButton(now, joystick, b, (buttons >> b) & 1);

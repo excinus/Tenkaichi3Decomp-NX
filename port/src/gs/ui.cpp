@@ -76,6 +76,9 @@ int Port_ClashSquare(void);                    // gs_input.c: Square counts as a
 void Port_ClashSquareSet(int on);
 int Port_MenuAbSwap(void);                     // gs_input.c: the Switch's A chooses and B goes back in the menus
 void Port_MenuAbSwapSet(int on);
+#ifdef __SWITCH__
+int Port_NxControllers(int players);           // plat_nxpad.c: the console's Controllers screen
+#endif
 int Port_ClashSquareX(void);                   // what a press is worth, in quarters of a point (4, 6, 7, 8)
 void Port_ClashSquareXSet(int quarters);
 extern int gsInterp;                           // gs_draw.c: in-between pictures on (1) / off (0); -1 before the first frame
@@ -2424,6 +2427,20 @@ static void build(void) {
                 ImGui::SetItemTooltip("The game's menus choose with Cross and go back with Triangle: on the Switch B and X.\n"
                                       "With this on, outside a fight A chooses and B goes back (and X is Circle), in these\n"
                                       "windows too. Fights, the pause menu included, keep the buttons below.");
+                {   // the console's Controllers screen (port/src/plat_nxpad.c): who holds which controller
+                    if (ImGui::Button("Controllers: 1 player")) {
+                        Port_NxControllers(1);
+                    }
+                    ImGui::SetItemTooltip("The console's Controllers screen for one player: the console in the hand, a pair of\n"
+                                          "Joy-Con or another controller (after two players played on one Joy-Con each).");
+                    ImGui::SameLine();
+                    if (ImGui::Button("Controllers: 2 players")) {
+                        Port_NxControllers(2);
+                    }
+                    ImGui::SetItemTooltip("The console's Controllers screen for two: a Joy-Con each, held sideways, or a second\n"
+                                          "controller. The first is player 1, the second player 2. The duel menu's 1P vs 2P\n"
+                                          "shows it by itself.");
+                }
 #endif
                 ImGui::Separator();
                 controls_tab();

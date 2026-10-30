@@ -636,6 +636,15 @@ void DuelMenu_Input(s32 *result) {
                     Snd_PlaySe(1, 7);
                     break;
                 }
+#if defined(PORT) && defined(__SWITCH__)
+                { /* the console's Controllers screen: a controller for each player (port/src/plat_nxpad.c) */
+                    extern int Port_NxControllers(int players);
+                    if (!Port_NxControllers(2)) {
+                        Snd_PlaySe(1, 7);
+                        break;
+                    }
+                }
+#endif
             default: {
                 char name[64];
 
