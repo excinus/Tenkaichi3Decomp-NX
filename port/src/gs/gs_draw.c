@@ -4913,6 +4913,21 @@ void GsGpu_FrameEnd(void) {
         sInterpPrevPrimCount = 0;
         gsVertCount = gsVuVertCount = gsVuIdxCount = gsVuUniCount = gsDrawCount = 0;
         skip_decide();
+        {
+            /* A picture uploaded straight into a display buffer in the skipped tick (the movies: gs_core.c,
+               transfer_data) had its copy into the buffer's texture among the draws just dropped, while the
+               upload stays marked, so the next tick did not record the copy again: the buffer shown kept an older
+               picture, or none (black). The intro movie flickered so on the Switch, where its frames take 90 ms
+               at the stock clock and most ticks were skipped. The copy is recorded again, first in the next
+               tick's draws (GsGpu_FbUpload records nothing if that tick is skipped too; then again after it). */
+            extern unsigned gGsFbUploads; /* gs_core.c */
+            if (gGsFbUploads & 1u) {
+                GsGpu_FbUpload(0);
+            }
+            if (gGsFbUploads & 2u) {
+                GsGpu_FbUpload(1);
+            }
+        }
         return;
     }
     uint64_t t0 = gpu_now();

@@ -452,7 +452,13 @@ static Handle sMainHandle;
    had not reached a vertical blank for 100 ms (a stall: the main menu's at each move, 1 to 3 s of "game code",
    2026-10-29), the address and the return address (lr: its caller) apart. In bt3_watch.txt. */
 #define PROF_SLOTS 4096
-enum { PROF_ALL, PROF_STALL, PROF_STALL_LR, PROF_TABLES };
+enum { PROF_ALL, PROF_STALL, PROF_STALL_LR, PROF_RENDER, PROF_RENDER_LR, PROF_TABLES };
+/* The render thread too, when there is one (gs/gs_core.c names itself: Port_ProfileThread), every 30 s: where the
+   OpenGL driver's time goes (24 ms of a fight frame at the stock clock, 2026-10-30), its address and its caller. */
+static volatile Handle sRenderHandle;
+void Port_ProfileThread(void) {
+    sRenderHandle = threadGetCurHandle();
+}
 static struct { uint32_t off, n; } sProfTab[PROF_TABLES][PROF_SLOTS];
 static unsigned sProfCount[PROF_TABLES];
 static Mutex sProfLock;
@@ -503,6 +509,17 @@ static void nx_prof(void *arg) {
             mutexUnlock(&sProfLock);
         } else {
             svcSetThreadActivity(sMainHandle, ThreadActivity_Runnable);
+        }
+        if (sRenderHandle != 0 && R_SUCCEEDED(svcSetThreadActivity(sRenderHandle, ThreadActivity_Paused))) {
+            if (R_SUCCEEDED(svcGetThreadContext3(&ctx, sRenderHandle))) {
+                svcSetThreadActivity(sRenderHandle, ThreadActivity_Runnable);
+                mutexLock(&sProfLock);
+                prof_add(PROF_RENDER, ctx.pc.x);
+                prof_add(PROF_RENDER_LR, ctx.lr);
+                mutexUnlock(&sProfLock);
+            } else {
+                svcSetThreadActivity(sRenderHandle, ThreadActivity_Runnable);
+            }
         }
     }
 }
@@ -596,6 +613,8 @@ static void watch_line(const char *what, unsigned t, unsigned late, int report) 
         at += prof_report(PROF_STALL_LR, "  and its return addresses then", text + at, sizeof(text) - at);
         if (report == 2) {
             at += prof_report(PROF_ALL, "the game's thread, the last 30 s (offsets from __start__)", text + at, sizeof(text) - at);
+            at += prof_report(PROF_RENDER, "the render thread, the last 30 s", text + at, sizeof(text) - at);
+            at += prof_report(PROF_RENDER_LR, "  and its return addresses", text + at, sizeof(text) - at);
         }
     }
     watch_write(text, at < sizeof(text) ? at : sizeof(text) - 1);

@@ -742,6 +742,11 @@ static int gl_init(void) {
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
     if (getenv("BT3_GPU_DEBUG") != NULL) { SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_DEBUG_FLAG); }
     if (getenv("BT3_GL_TRACE") != NULL) { fprintf(stderr, "gl: window made, creating the context\n"); }
+#ifdef __SWITCH__
+    /* Mesa without its error checks in every GL call (the driver's CPU work is what a fight frame waits for on the
+       Switch: 24 ms of draws at the stock clock, 2026-10-30). MESA_NO_ERROR=0 in bt3_env.txt keeps them. */
+    setenv("MESA_NO_ERROR", "1", 0);
+#endif
     sCtx = SDL_GL_CreateContext(sWindow);
     if (getenv("BT3_GL_TRACE") != NULL) { fprintf(stderr, "gl: context %p (%s)\n", (void *)sCtx, sCtx == NULL ? SDL_GetError() : "ok"); }
     if (sCtx == NULL || !SDL_GL_MakeCurrent(sWindow, sCtx)) {

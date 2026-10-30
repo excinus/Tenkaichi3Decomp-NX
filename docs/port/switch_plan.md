@@ -230,6 +230,11 @@ AI tools (its CLAUDE.md), and they were. Kept in this repository and applied at 
 
 ### The NSP
 
+**Dropped (2026-10-30, the player's call):** the game stays an `.nro`. A forwarder (for example the one included
+in sphaira, github.com/NaGaa95/sphaira) puts any `.nro` on the HOME menu and starts it from there, as players do for
+the other homebrew; an NSP of the project's own would need its own installing and updating (DBI), for nothing a
+forwarder does not already give. What follows was the plan, kept for the record.
+
 An NSP is encrypted with the console's keys, which the project cannot ship. The setup makes it on the player's PC
 from the player's own `prod.keys` (dumped from their console with Lockpick_RCM), as the usual forwarder makers do:
 a program NCA (the launcher's NSO and NPDM) and a control NCA (name, icon, NACP: the application's memory, no save
@@ -246,7 +251,7 @@ an `.nro` from the homebrew menu through a game (hold R): the same folder, no HO
 | 2. The game builds for the Switch | `BT3_CC=nx64` compiles and links the whole game with libnx (`BT3_SKELETON=1`), in CI. **Done** (2026-10-29): `port/build/bt3_nx`; stubs for SDL3 and four system calls. |
 | 3. The demo fight on a console | The launcher loads the game; the attract-demo fight runs without a picture and its `BT3_HASH` lines (written to the card) equal Linux's (`compare_hash.py`). **Done** (2026-10-29): "battle finished", the fight's values the same as the PC's on all 4242 blanks of fighting. |
 | 4. Playable | The platform layer: picture (GL), sound, controllers; the game plays from boot to a fight and saves. Built (2026-10-29): SDL3's Switch drivers, the game's folder as the PC release's (`package.py`). First start on a console: hangs after the language list (see "Results"). |
-| 5. The package | The setup's Switch mode, the NSP from the player's keys, `Tenkaichi3Decomp-switch.zip` in the release workflow, the updater's Switch asset and its restart through the launcher. |
+| 5. The package | The setup's Switch mode, `Tenkaichi3Decomp-switch.zip` in the release workflow, the updater's Switch asset and its restart through the launcher. The `.nro` is the program to start (from the homebrew menu, or the HOME menu through a forwarder such as sphaira's); no NSP of its own ("The NSP"). |
 | 6. Online | A lobby between a Switch and a PC, by code and by address. |
 
 Biggest risk: **speed**. The game's arithmetic is exact software float (the README asks for a recent mid-range PC
@@ -659,3 +664,18 @@ of 120 not shown; 0 of about 2270 draws a frame could be joined with the draw be
 block), so joining draws is not worth doing. At the stock clock the draws' 14.5 ms would be about 25: the driver's
 CPU work is what an unclocked console still lacks. Changed: vibration at 30% by default on the Switch (at 100% too
 strong in the Joy-Cons, the player's report), in the settings' default and the Controls tab's reset alike.
+
+The same kit at the stock clock (sys-clk off), with the intro movie on: fights at about 15 pictures a second, uneven,
+the HUD jumping (61 to 68 ticks of 120 not shown); OpenGL's draws 24 ms a fight frame (14.5 at 1785 MHz), the GPU
+never waited for. The intro movie: every fifth frame about 90 ms of the game's own time (the movie's decoding, at
+the stock clock), 89 ticks of 120 skipped, and the picture flickering black (only the intro movie, not the legal
+screens). The movie puts its pictures straight into a display buffer (gs_core.c, transfer_data), and the copy into
+that buffer's texture is a draw of the tick (GsGpu_FbUpload), recorded once while the upload stays marked: a
+skipped tick dropped its draws, the mark stayed, the next tick recorded no copy, and the buffer shown had an older
+picture or none. Changed:
+- after a skipped tick, the copy of a picture uploaded in it is recorded again (gs_draw.c, GsGpu_FrameEnd);
+- the sampling profile takes the render thread too, every 30 s in bt3_watch.txt with its callers: where the OpenGL
+  driver's 24 ms go (Mesa's functions are in bt3_nx's symbols);
+- `MESA_NO_ERROR=1` on the Switch (Mesa without its per-call error checks; no GL error in any run since the
+  black-screen kit); `MESA_NO_ERROR=0` in bt3_env.txt to compare;
+- the launcher is named "Dragon Ball Z: Budokai Tenkaichi 3"; the NSP is dropped (see "The NSP").

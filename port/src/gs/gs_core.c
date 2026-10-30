@@ -1258,7 +1258,9 @@ static void *render_thread(void *arg) {
 #ifdef __SWITCH__
     {   /* a core of its own: the game's thread is on core 0, the sound's on core 2 (plat_nxfs.c) */
         extern void Port_NxThreadCore(int core);
+        extern void Port_ProfileThread(void); /* plat_mem.c: sampled as the game's thread is */
         Port_NxThreadCore(1);
+        Port_ProfileThread();
     }
 #endif
     pthread_mutex_lock(&sLock);
