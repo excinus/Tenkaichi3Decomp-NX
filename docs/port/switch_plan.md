@@ -605,3 +605,12 @@ Changed:
   marker, those the renderer kept and those of them that are 2D with alpha 0; `BT3_GS_DUMP=hud`: the frame 300 after
   the first HUD marker listed primitive by primitive, its markers included;
 - `bt3_env.txt` no longer offers `mesa_glthread` (slower on the console).
+
+The kit of commit d85cc4b, the same console, with the pack made (`gamedata/pzs3us2/: read from gamedata/pzs3us2.afs
+(65201 files, 1160 MB)`): the game started and ran (sound, input) but the screen stayed black. The log: every
+target "framebuffer incomplete" from frame 0 and GL_INVALID_OPERATION at every frame. With the render thread, the
+game's own transfers on the GIF channel (`Port_GsGifChannel`: it clears its frame buffers that way at the start, and
+uploads textures) ran on the game's thread, where the OpenGL context is not current: the targets were made there
+without a context. Changed: with OpenGL on the render thread such a transfer is a job of that thread (the game's
+thread waits for it). `BT3_GS_DUMP=hud` listed frame 0 (`atoi("hud")`): fixed. The launcher's icon from a
+higher-quality cover. Merged: upstream v0.1.39.2 (widescreen menus beta, macOS fixes).
