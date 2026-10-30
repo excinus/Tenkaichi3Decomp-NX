@@ -327,8 +327,11 @@ __attribute__((constructor(101))) static void nx_start(void) {
             dup2(fd, 1);
             dup2(fd, 2);
             close(fd);
-            setvbuf(stdout, NULL, _IOLBF, 0);
-            setvbuf(stderr, NULL, _IOLBF, 0);
+            /* in blocks, put on the card by the watch thread twice a second (nx_watch): line by line, each line was
+               a write to the card of about 4 ms on the thread that wrote it (a fight's slow-frame lines, three a
+               frame, on the game's and the render thread) */
+            setvbuf(stdout, NULL, _IOFBF, 64 * 1024);
+            setvbuf(stderr, NULL, _IOFBF, 64 * 1024);
         }
     }
     watch_start();
@@ -416,7 +419,7 @@ int __wrap_main(int argc, char **argv) {
 
 /* The watch thread: started first of all (nx_start, before the game's data is read and its memory reserved), beside
    the game until it returns to the launcher. Twice a second:
-   the log onto the card (fsync), so that what the game wrote is kept when it is ended from outside while it hangs;
+   the log onto the card (its buffers emptied, fsync), so that what the game wrote is kept when it is ended from outside while it hangs;
    and every 2 seconds for the first 3 minutes, after that when nothing is drawn or the file service is called more
    than 2000 times a second, a few lines in bt3_watch.txt: the time, how late the thread woke (a busy processor), the
    frame counters, the start's stage, the file service's calls (plat_nxfs.c), any call that has not come back for a
@@ -619,6 +622,16 @@ static void nx_watch(void *arg) {
             late = slept - 500; /* (the most in this report's 2 seconds) */
         }
         was = now;
+        /* the log's buffers onto the card: only when no thread is writing to them (a thread stuck in a write holds
+           the stream's lock; this thread must never wait for it) */
+        if (ftrylockfile(stdout) == 0) {
+            fflush(stdout);
+            funlockfile(stdout);
+        }
+        if (ftrylockfile(stderr) == 0) {
+            fflush(stderr);
+            funlockfile(stderr);
+        }
         if (sLogFd[0] >= 0) {
             fsync(sLogFd[0]);
         }

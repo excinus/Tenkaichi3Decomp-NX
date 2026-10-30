@@ -73,9 +73,6 @@ BT3_GS_VERBOSE=1
 BT3_HUD_LOG=1
 # The drawing on the game's own core, as in the kits before (slower): remove the # to compare.
 #BT3_GS_THREAD=0
-# One fight frame listed piece by piece in bt3_log.txt, 10 seconds into the first fight (a test of the HUD; the
-# log grows by a few MB): remove the # in front of the next line.
-#BT3_GS_DUMP=hud
 ENV
 cat > $K/README.txt <<'TXT'
 Tenkaichi3Decomp for the Nintendo Switch - test kit: the game (phase 4 of docs/port/switch_plan.md)

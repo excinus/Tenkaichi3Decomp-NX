@@ -253,6 +253,26 @@ struct Window {
         Value *off = B.CreateIntToPtr(B.CreateSub(B.CreatePtrToInt(p, I64), B.CreatePtrToInt(window(), I64)), Game, "w.game");
         return !mayBeNull || knownNonNull(p) ? off : B.CreateSelect(B.CreateIsNull(p), ConstantPointerNull::get(Game), off);
     }
+    // A 64-bit ptrtoint of an ordinary pointer subtracted from (or from) a 4-byte pointer's.
+    bool inMixedDifference(PtrToIntInst *PI) {
+        for (User *U : PI->users()) {
+            auto *BO = dyn_cast<BinaryOperator>(U);
+            if (!BO || BO->getOpcode() != Instruction::Sub) {
+                continue;
+            }
+            Value *other = BO->getOperand(0) == PI ? BO->getOperand(1) : BO->getOperand(0);
+            auto *OP = dyn_cast<PtrToIntInst>(other);
+            if (OP && isGame(OP->getPointerOperand()->getType())) {
+                return true;
+            }
+            if (auto *CE = dyn_cast<ConstantExpr>(other)) {
+                if (CE->getOpcode() == Instruction::PtrToInt && isGame(CE->getOperand(0)->getType())) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
     Value *mem(Instruction *I, Value *ptr) { // a pointer used to reach memory: no null case to keep
         if (!isGame(ptr->getType())) {
             return ptr;
@@ -312,6 +332,28 @@ struct Window {
             } else if (auto *PI = dyn_cast<PtrToIntInst>(I)) {
                 if (!PortModule && PI->getPointerAddressSpace() == 0 && PI->getType()->getIntegerBitWidth() <= 32) {
                     PI->setOperand(0, game(B, PI->getOperand(0)));
+                } else if (!PortModule && PI->getPointerAddressSpace() == 0 && inMixedDifference(PI)) {
+                    // `p - q` of a 4-byte pointer and an ordinary one (a parameter: ptr32.py keeps those 64-bit):
+                    // clang subtracts their ptrtoint to 64 bits, an offset (zero-extended) and W + offset. The
+                    // ordinary one is taken as its game address too, as on Linux where the two are equal. (Was the
+                    // window's base in the difference: ObjShadow_BuildPacket's `(p - pkt) / 4` made the shadow
+                    // packet's RET tag a NEXT to 0 in any window but the fixed one, and the list ended there: a
+                    // fight's effects, HUD and pause menu were never drawn, seen on a Switch.)
+                    Value *R = B.CreateZExt(B.CreatePtrToInt(game(B, PI->getOperand(0)), I32), PI->getType());
+                    PI->replaceAllUsesWith(R);
+                    PI->eraseFromParent();
+                }
+            } else if (auto *BO = dyn_cast<BinaryOperator>(I); BO && !PortModule && BO->getOpcode() == Instruction::Sub) {
+                // the same with an ordinary pointer that is a constant (a global's address): `p - gTable`
+                for (unsigned k = 0; k < 2; k++) {
+                    auto *CE = dyn_cast<ConstantExpr>(BO->getOperand(k));
+                    Value *other = BO->getOperand(1 - k);
+                    auto *OP = dyn_cast<PtrToIntInst>(other);
+                    if (CE && CE->getOpcode() == Instruction::PtrToInt && CE->getOperand(0)->getType()->getPointerAddressSpace() == 0 &&
+                        OP && isGame(OP->getPointerOperand()->getType())) {
+                        Value *g = B.Insert(CastInst::Create(Instruction::PtrToInt, gameC(CE->getOperand(0)), I32));
+                        BO->setOperand(k, B.Insert(CastInst::Create(Instruction::ZExt, g, CE->getType())));
+                    }
                 }
             } else if (auto *L = dyn_cast<LoadInst>(I)) {
                 L->setOperand(L->getPointerOperandIndex(), mem(I, L->getPointerOperand()));

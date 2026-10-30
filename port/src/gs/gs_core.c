@@ -1725,6 +1725,13 @@ static void walk_chain(uint32_t tadr, int tte, void (*block)(const uint32_t *tag
         int end = 0;
 
         if (tag == NULL) { /* (a chain led to address 0: see below) */
+            /* The rest of the list is lost. Said once: a fight's effects, HUD and pause menu were missing on the
+               Switch because a tag's id had become NEXT (address 0) where it was RET (the window pass, macwin.cpp). */
+            static int told;
+            if (!told) {
+                told = 1;
+                fprintf(stderr, "bt3: gs: frame %u: the list leads to address 0 (depth %u): the rest of it is left out\n", sFrame, sp);
+            }
             break;
         }
         qwc = tag[0] & 0xFFFF;

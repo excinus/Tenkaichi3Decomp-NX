@@ -189,6 +189,7 @@ static void report(FILE *f, const ThreadExceptionDump *ctx) {
 void __libnx_exception_handler(ThreadExceptionDump *ctx) {
     FILE *f = fopen("bt3_crash.txt", "w");
     report(stderr, ctx);
+    fflush(stderr); /* (the log is written in blocks on the Switch: plat_mem.c) */
     if (f != NULL) {
         report(f, ctx);
         fclose(f);

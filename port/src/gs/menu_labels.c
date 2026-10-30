@@ -2329,6 +2329,123 @@ static int ml_art_walk(MlBuf usa, MlBuf eu, int file, uint32_t *path, int depth,
     return 1;
 }
 
+#ifdef __SWITCH__
+/* The Switch: the pairing kept in a file once made (gamedata/game-text/menu_art_<bank>.cache), as its pairs and the
+   European texture files, and read from it at the next start. Made, it took 12 s on a console, the menus showing the
+   USA disc's pictures until then; read back, a fraction of a second. Made again when the European archives it was
+   made from have other sizes, or the file is of another build's kind. */
+#define ML_ART_CACHE_KIND 1
+typedef struct MlArtCacheHead {
+    char magic[8];
+    uint32_t kind, artSize, bank, n, files;
+    int64_t euSize[ML_FILES];
+} MlArtCacheHead;
+
+static void ml_art_cache_key(const char *dataDir, int bank, MlArtCacheHead *h) {
+    int f;
+    memset(h, 0, sizeof(*h));
+    memcpy(h->magic, "BT3ART\0", 8);
+    h->kind = ML_ART_CACHE_KIND;
+    h->artSize = (uint32_t)sizeof(MlArt);
+    h->bank = (uint32_t)bank;
+    for (f = 0; f < ML_FILES; f++) {
+        int number = kMlFiles[f].number, entry = number == 5 ? 5 + bank : 451 + (number - 448) + bank * 31;
+        char path[1300];
+        struct stat st;
+        snprintf(path, sizeof(path), "%s/pzs3eu1/%05d.bin", dataDir, entry);
+        h->euSize[f] = stat(path, &st) == 0 ? (int64_t)st.st_size : -1;
+    }
+}
+
+static void ml_art_cache_path(const char *dataDir, int bank, char *path, size_t n) {
+    snprintf(path, n, "%s/game-text/menu_art_%d.cache", dataDir, bank);
+}
+
+static int ml_art_cache_load(const char *dataDir, int bank, MlArtBuild *b) {
+    MlArtCacheHead want, h;
+    char path[1300];
+    FILE *fp;
+    uint32_t k;
+
+    ml_art_cache_key(dataDir, bank, &want);
+    ml_art_cache_path(dataDir, bank, path, sizeof(path));
+    if ((fp = fopen(path, "rb")) == NULL) {
+        return 0;
+    }
+    if (fread(&h, sizeof(h), 1, fp) != 1 || memcmp(h.magic, want.magic, 8) != 0 || h.kind != want.kind || h.artSize != want.artSize ||
+        h.bank != want.bank || memcmp(h.euSize, want.euSize, sizeof(want.euSize)) != 0 || h.n > 1000000 || h.files > 100000) {
+        fclose(fp);
+        return 0;
+    }
+    b->art = malloc((size_t)(h.n > 0 ? h.n : 1) * sizeof(MlArt));
+    sArtFile = calloc(h.files > 0 ? h.files : 1, sizeof(*sArtFile));
+    if (b->art == NULL || sArtFile == NULL || fread(b->art, sizeof(MlArt), h.n, fp) != h.n) {
+        goto bad;
+    }
+    for (k = 0; k < h.files; k++) {
+        uint64_t n;
+        uint8_t *d;
+        if (fread(&n, sizeof(n), 1, fp) != 1 || n > 64u * 1024 * 1024 || (d = malloc(n > 0 ? (size_t)n : 1)) == NULL) {
+            goto bad;
+        }
+        sArtFile[k].p = d;
+        sArtFile[k].n = (size_t)n;
+        if (fread(d, 1, (size_t)n, fp) != (size_t)n) {
+            goto bad;
+        }
+    }
+    for (k = 0; k < h.n; k++) {
+        if (b->art[k].file >= h.files) {
+            goto bad;
+        }
+    }
+    fclose(fp);
+    b->n = (int)h.n;
+    b->cap = (int)h.n;
+    b->files = b->capFiles = h.files;
+    return 1;
+bad:
+    fclose(fp);
+    if (sArtFile != NULL) {
+        for (k = 0; k < h.files; k++) {
+            free((void *)sArtFile[k].p);
+        }
+    }
+    free(sArtFile);
+    sArtFile = NULL;
+    free(b->art);
+    b->art = NULL;
+    return 0;
+}
+
+static void ml_art_cache_save(const char *dataDir, int bank, const MlArtBuild *b) {
+    MlArtCacheHead h;
+    char path[1300], tmp[1320];
+    FILE *fp;
+    uint32_t k;
+    int ok;
+
+    ml_art_cache_key(dataDir, bank, &h);
+    h.n = (uint32_t)b->n;
+    h.files = b->files;
+    ml_art_cache_path(dataDir, bank, path, sizeof(path));
+    snprintf(tmp, sizeof(tmp), "%s.part", path);
+    if ((fp = fopen(tmp, "wb")) == NULL) {
+        return;
+    }
+    ok = fwrite(&h, sizeof(h), 1, fp) == 1 && fwrite(b->art, sizeof(MlArt), (size_t)b->n, fp) == (size_t)b->n;
+    for (k = 0; ok && k < b->files; k++) {
+        uint64_t n = sArtFile[k].n;
+        ok = fwrite(&n, sizeof(n), 1, fp) == 1 && fwrite(sArtFile[k].p, 1, sArtFile[k].n, fp) == sArtFile[k].n;
+    }
+    ok = fclose(fp) == 0 && ok;
+    remove(path);
+    if (!ok || rename(tmp, path) != 0) {
+        remove(tmp);
+    }
+}
+#endif
+
 int MenuLabels_Art(const char *dataDir, int bank, char *why, size_t whyLen) {
     MlCtx *c = calloc(1, sizeof(*c));
     MlArtBuild b;
@@ -2340,6 +2457,11 @@ int MenuLabels_Art(const char *dataDir, int bank, char *why, size_t whyLen) {
     if (c == NULL || bank < 1 || bank > 4) {
         goto done;
     }
+#ifdef __SWITCH__
+    if (ml_art_cache_load(dataDir, bank, &b)) {
+        goto built;
+    }
+#endif
     if (ml_read_disc(c, dataDir, 0) != MENU_LABELS_MADE) {
         snprintf(why, whyLen, "%s", c->why);
         goto done;
@@ -2385,6 +2507,10 @@ int MenuLabels_Art(const char *dataDir, int bank, char *why, size_t whyLen) {
         }
         free(eu);
     }
+#ifdef __SWITCH__
+    ml_art_cache_save(dataDir, bank, &b);
+built:
+#endif
     qsort(b.art, (size_t)b.n, sizeof(*b.art), ml_art_order);
     sArtMid = malloc((size_t)(b.n > 0 ? b.n : 1) * sizeof(*sArtMid));
     if (sArtMid == NULL) {

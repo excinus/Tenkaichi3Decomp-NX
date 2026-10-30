@@ -614,3 +614,26 @@ uploads textures) ran on the game's thread, where the OpenGL context is not curr
 without a context. Changed: with OpenGL on the render thread such a transfer is a job of that thread (the game's
 thread waits for it). `BT3_GS_DUMP=hud` listed frame 0 (`atoi("hud")`): fixed. The launcher's icon from a
 higher-quality cover. Merged: upstream v0.1.39.2 (widescreen menus beta, macOS fixes).
+
+The kit of commit 3617802, the same console: a picture again, and the main menus without stutters (the pack). Italian
+menus after 10 to 15 s; fights at 9-10 pictures a second at the stock clock, 18-28 with sys-clk; no HUD, and no
+effects at all (ki blasts, beams, particles); during a super attack the HUD and the effects were there, and gone
+after it. `BT3_HUD_LOG`: in a fight no HUD marker at all, not even the one that starts the battle's 2D
+(`BtlGame_Draw`), except during the super attack. The frame listed (`BT3_GS_DUMP=hud`) ended at
+`dma tag at 01001c40: id 2 qwc 29 addr 00000000` inside a CALL: a NEXT to address 0, where the walk stops
+(Port_Ptr(0) is NULL), so everything the game put in the list after it (effects, HUD, pause menu) was never drawn.
+The packet is the fighters' shadow (`ObjShadow_BuildPacket`, its words 0x6C018000 / 0x8000), whose tag is a RET:
+`pkt[0] = (p - pkt) / 4 + 0x5FFFFFFE`. `pkt` is a parameter (ptr32.py keeps those 64-bit host pointers), `p` a
+4-byte game pointer, and clang subtracts their ptrtoint to 64 bits: the window's base W was in the difference, and
+W / 16 put bits 32 to 35 of W on the tag's id. The fixed window (0x4000000000) has those bits 0, as has the Mac's
+(1 TB): this console's launcher takes another window (the fixed one is the system's there, phase 3), and the RET
+became a NEXT. In the super attack's scenes no shadow is drawn. Changed:
+- the window pass (macwin.cpp): a 64-bit ptrtoint of an ordinary pointer subtracted from (or from) a 4-byte
+  pointer's is taken as its game address, as is a global's address in such a difference. Of the whole game only
+  gfxm_e_b.o compiles differently;
+- `walk_chain` says once when the list leads to address 0 (the rest was dropped silently);
+- the log in 64 KB blocks, put on the card by the watch thread twice a second (it takes the stream's lock only when
+  free); line by line, each line was a write of about 4 ms on the thread writing it. `BT3_GS_DUMP=hud` is out of
+  `bt3_env.txt` (written line by line, it held the game for minutes: the "stuck" after the super attack);
+- the European menu art's pairing (12.4 s on the console, the Italian pictures missing until then) kept in
+  `gamedata/game-text/menu_art_<bank>.cache` once made, and read from it at the next start (the Switch only).
